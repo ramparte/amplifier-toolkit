@@ -1,0 +1,423 @@
+# Feature Development Workflow Recipe
+# ==================================
+# A staged workflow for feature development with design review gates.
+#
+# Stages:
+#   1. DESIGN - Architecture design with human approval gate
+#   2. IMPLEMENT - Code generation from approved design
+#   3. VALIDATE - LSP diagnostics, tests, and philosophy review
+#   4. CLEANUP - Remove cruft and generate final summary
+#
+# Usage:
+#   # From GitHub:
+#   amplifier recipes execute git+https://github.com/ramparte/amplifier-toolkit@main:recipes/feature-workflow.yaml \
+#     --context '{"feature_name": "auth-module", "feature_description": "OAuth2 with JWT", "target_directory": "src/auth"}'
+#
+#   # With existing design (skip design creation):
+#   amplifier recipes execute git+https://github.com/ramparte/amplifier-toolkit@main:recipes/feature-workflow.yaml \
+#     --context '{"feature_name": "auth-module", "feature_description": "OAuth2", "target_directory": "src/auth", "design_doc_path": "docs/auth-design.md"}'
+#
+# Approval workflow:
+#   After DESIGN stage, recipe pauses for review:
+#     amplifier recipes approvals                    # List pending
+#     amplifier recipes approve --session-id <id> --stage-name design
+#     amplifier recipes resume --session-id <id>
+
+name: "feature-workflow"
+description: "Complete feature development workflow with staged design review, implementation, LSP validation, and cleanup"
+version: "1.0.0"
+author: "ramparte"
+tags: ["feature", "workflow", "staged", "design-review", "validation"]
+
+context:
+  # Required: Name of the feature being built
+  feature_name: ""
+  
+  # Required: Detailed requirements and goals for the feature
+  feature_description: ""
+  
+  # Required: Target directory for implementation
+  target_directory: ""
+  
+  # Optional: Path to existing design document (skips design creation if provided)
+  design_doc_path: ""
+
+# ============================================================================
+# STAGE 1: DESIGN
+# ============================================================================
+# Creates or analyzes architecture design. Requires human approval before
+# proceeding to implementation.
+
+stages:
+  - name: "design"
+    steps:
+      # If existing design doc provided, analyze it
+      - id: "analyze-existing-design"
+        condition: "{{design_doc_path}} != ''"
+        agent: "foundation:zen-architect"
+        prompt: |
+          An existing design document has been provided. Read and analyze it.
+          
+          Design Document: {{design_doc_path}}
+          Feature: {{feature_name}}
+          Requirements: {{feature_description}}
+          Target: {{target_directory}}
+          
+          Tasks:
+          1. Read the design document at {{design_doc_path}}
+          2. Summarize key architectural decisions
+          3. Identify components and responsibilities
+          4. List files/modules to create
+          5. Note implementation considerations
+          6. Flag gaps between design and requirements
+          
+          Provide structured analysis to guide implementation.
+        output: "design_analysis"
+        timeout: 900
+
+      # If no design doc, create comprehensive design
+      - id: "create-design"
+        condition: "{{design_doc_path}} == ''"
+        agent: "foundation:zen-architect"
+        prompt: |
+          Design the architecture for a new feature.
+          
+          Feature: {{feature_name}}
+          Requirements: {{feature_description}}
+          Target: {{target_directory}}
+          
+          Create a design document including:
+          
+          ## 1. Overview
+          - Purpose and scope
+          - Key goals and success criteria
+          
+          ## 2. Architecture
+          - Component breakdown
+          - Data flow and interactions
+          - Integration points
+          
+          ## 3. File Structure
+          - Directory organization
+          - Files to create with purposes
+          
+          ## 4. Interfaces
+          - Public APIs and contracts
+          - Configuration options
+          - Error handling strategy
+          
+          ## 5. Implementation Plan
+          - Suggested order
+          - Dependencies between components
+          - Testing approach
+          
+          ## 6. Considerations
+          - Edge cases
+          - Performance
+          - Security (if applicable)
+          
+          Write the design document to: {{target_directory}}/DESIGN.md
+          
+          Then provide a summary for the approval review.
+        output: "design_analysis"
+        timeout: 1200
+
+      # Prepare implementation guide from design
+      - id: "prepare-implementation-guide"
+        agent: "foundation:zen-architect"
+        prompt: |
+          Prepare a structured implementation guide from the design.
+          
+          Design Analysis:
+          {{design_analysis}}
+          
+          Create a guide including:
+          1. All files to create (full paths relative to {{target_directory}})
+          2. Key interfaces and signatures
+          3. Dependencies between files (build order)
+          4. External dependencies to install
+          
+          Format as actionable implementation instructions.
+        output: "implementation_guide"
+        timeout: 600
+
+    # APPROVAL GATE: Human reviews design before implementation
+    approval:
+      required: true
+      prompt: |
+        ════════════════════════════════════════════════════════════════════
+                            DESIGN REVIEW REQUIRED
+        ════════════════════════════════════════════════════════════════════
+        Feature: {{feature_name}}
+        Target:  {{target_directory}}
+        ────────────────────────────────────────────────────────────────────
+        
+        DESIGN SUMMARY:
+        {{design_analysis}}
+        
+        IMPLEMENTATION GUIDE:
+        {{implementation_guide}}
+        
+        ────────────────────────────────────────────────────────────────────
+        
+        Review the design document at: {{target_directory}}/DESIGN.md
+        
+        → APPROVE: Implementation proceeds based on this design
+        → DENY: Recipe stops, revise design manually
+      timeout: 0
+      default: "deny"
+
+
+  # ============================================================================
+  # STAGE 2: IMPLEMENT
+  # ============================================================================
+  # Creates code and files based on approved design.
+
+  - name: "implement"
+    steps:
+      - id: "implement-feature"
+        agent: "foundation:modular-builder"
+        prompt: |
+          Implement the feature based on the approved design.
+          
+          Feature: {{feature_name}}
+          Target: {{target_directory}}
+          
+          APPROVED DESIGN:
+          {{design_analysis}}
+          
+          IMPLEMENTATION GUIDE:
+          {{implementation_guide}}
+          
+          Instructions:
+          1. Create all files specified in the design
+          2. Follow implementation order for dependencies
+          3. Write clean, documented code
+          4. Include docstrings and type hints (Python)
+          5. Create necessary __init__.py files
+          6. Add comments for complex logic
+          
+          Focus on:
+          - Correctness: Match design specifications
+          - Clarity: Readable, self-documenting code
+          - Completeness: No TODOs for core functionality
+          
+          After implementation, summarize:
+          - Files created (with paths)
+          - Deviations from design (and why)
+          - Known limitations
+        output: "implementation_result"
+        timeout: 1800
+
+      - id: "catalog-changes"
+        agent: "foundation:zen-architect"
+        prompt: |
+          Catalog all changes from the implementation.
+          
+          Implementation Result:
+          {{implementation_result}}
+          
+          Target: {{target_directory}}
+          
+          Tasks:
+          1. List ALL files created or modified
+          2. Identify Python files (for LSP validation)
+          3. Identify test files
+          4. Note primary entry points
+          
+          Output format:
+          
+          FILES_CREATED:
+          - path/to/file.py (type: source|test|config|doc)
+          
+          PYTHON_FILES: [list for LSP]
+          TEST_FILES: [list of tests]
+          ENTRY_POINTS: [main modules/classes]
+        output: "change_catalog"
+        timeout: 300
+
+
+  # ============================================================================
+  # STAGE 3: VALIDATE
+  # ============================================================================
+  # LSP diagnostics, tests, and philosophy review.
+
+  - name: "validate"
+    steps:
+      - id: "lsp-validation"
+        agent: "foundation:zen-architect"
+        prompt: |
+          Perform LSP-based code validation on implemented files.
+          
+          Change Catalog:
+          {{change_catalog}}
+          
+          Target: {{target_directory}}
+          
+          For each Python file:
+          1. Use LSP hover to check type information
+          2. Use LSP goToDefinition to verify imports resolve
+          3. Use LSP findReferences to check for unused code
+          
+          Check for:
+          - Type errors and mismatches
+          - Unresolved imports
+          - Circular import issues
+          - Missing type annotations on public APIs
+          
+          Report as:
+          - ERRORS: Must fix
+          - WARNINGS: Should investigate
+          - INFO: Minor improvements
+        output: "lsp_results"
+        timeout: 600
+        on_error: "continue"
+
+      - id: "run-tests"
+        agent: "foundation:zen-architect"
+        prompt: |
+          Execute tests for the implemented feature.
+          
+          Feature: {{feature_name}}
+          Target: {{target_directory}}
+          Change Catalog: {{change_catalog}}
+          
+          Tasks:
+          1. Identify test command (pytest, etc.)
+          2. Run tests for the new feature
+          3. Report: total, passed, failed, skipped
+          4. Detail any failures
+          
+          If no tests exist, note which tests should be created.
+        output: "test_results"
+        timeout: 900
+        on_error: "continue"
+
+      - id: "philosophy-review"
+        agent: "foundation:zen-architect"
+        prompt: |
+          Review implementation against philosophy principles.
+          
+          Feature: {{feature_name}}
+          Design: {{design_analysis}}
+          Implementation: {{implementation_result}}
+          LSP Results: {{lsp_results}}
+          Test Results: {{test_results}}
+          
+          Evaluate:
+          
+          ## SIMPLICITY
+          - As simple as possible while meeting requirements?
+          - Unnecessary abstractions?
+          
+          ## COMPOSABILITY
+          - Components independent and loosely coupled?
+          - Reusable in other contexts?
+          
+          ## CLARITY
+          - Self-documenting code?
+          - Descriptive, consistent names?
+          
+          ## CORRECTNESS
+          - Matches design intent?
+          - Edge cases handled?
+          
+          Provide:
+          1. Quality score (1-10)
+          2. Strengths
+          3. Areas for improvement
+          4. Specific recommendations
+        output: "review_results"
+        timeout: 600
+
+
+  # ============================================================================
+  # STAGE 4: CLEANUP
+  # ============================================================================
+  # Remove cruft and generate final summary.
+
+  - name: "cleanup"
+    steps:
+      - id: "post-task-cleanup"
+        agent: "foundation:zen-architect"
+        prompt: |
+          Perform post-task cleanup.
+          
+          Feature: {{feature_name}}
+          Target: {{target_directory}}
+          Change Catalog: {{change_catalog}}
+          
+          Scan for:
+          
+          ## DEBUG ARTIFACTS
+          - print/console.log statements (unless intentional)
+          - debugger statements
+          - Hardcoded test values
+          
+          ## CODE CRUFT
+          - Commented-out code
+          - Unused imports/variables/functions
+          - Dead code paths
+          
+          ## INCOMPLETE ITEMS
+          - TODOs that should be addressed
+          - NotImplementedError placeholders
+          
+          ## FILE ARTIFACTS
+          - Temporary files (.tmp, .bak)
+          - Generated files that shouldn't commit
+          
+          For each issue:
+          1. Report file, line, issue
+          2. Fix if safe, flag if needs judgment
+          
+          Provide cleanup report.
+        output: "cleanup_results"
+        timeout: 600
+
+      - id: "final-summary"
+        agent: "foundation:zen-architect"
+        prompt: |
+          Generate final workflow summary.
+          
+          ════════════════════════════════════════════════════════════════════
+          FEATURE COMPLETE: {{feature_name}}
+          ════════════════════════════════════════════════════════════════════
+          
+          Compile results:
+          
+          Design: {{design_analysis}}
+          Implementation: {{implementation_result}}
+          Changes: {{change_catalog}}
+          LSP: {{lsp_results}}
+          Tests: {{test_results}}
+          Review: {{review_results}}
+          Cleanup: {{cleanup_results}}
+          
+          Create summary including:
+          
+          1. **What Was Built**
+             - Feature overview
+             - Key components
+             - Primary files
+          
+          2. **Quality Assessment**
+             - Overall score
+             - Validation summary
+             - Test coverage
+          
+          3. **Issues & Resolutions**
+             - Problems resolved
+             - Remaining issues
+          
+          4. **Next Steps**
+             - Follow-up tasks
+             - Documentation updates
+             - Integration steps
+          
+          5. **Files Changed**
+             - Complete file list
+          
+          Format for PR description or changelog.
+        output: "final_summary"
+        timeout: 600
