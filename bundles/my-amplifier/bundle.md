@@ -37,11 +37,14 @@ A thin bundle combining amplifier-dev with persistent dev-memory capabilities.
 ## Usage
 
 ```bash
-# Run with this bundle
-amplifier run --bundle git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/my-amplifier/bundle.md
+# Add to your local bundle list
+amplifier bundle add git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/my-amplifier
+
+# Or run directly
+amplifier run --bundle git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/my-amplifier
 
 # Or set as default in ~/.amplifier/settings.yaml:
-# bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/my-amplifier/bundle.md
+# bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/my-amplifier
 ```
 
 ---
