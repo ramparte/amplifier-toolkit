@@ -24,6 +24,12 @@ Reusable multi-step workflows for common development tasks.
 
 Domain-specific knowledge and patterns.
 
+| Skill | Description |
+|-------|-------------|
+| `code-field` | Environmental prompting for rigorous code generation - surfaces edge cases, makes assumptions visible |
+
+**Usage:** Say "using code field principles, [task]" or "apply code field to this implementation"
+
 ## Usage
 
 ### Using Bundles
