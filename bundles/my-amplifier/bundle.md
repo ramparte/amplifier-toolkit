@@ -14,6 +14,9 @@ includes:
   
   # Dev-memory behavior - persistent local memory
   - bundle: git+https://github.com/ramparte/amplifier-collection-dev-memory@main#subdirectory=behaviors/dev-memory.yaml
+  
+  # Looper - supervised work loop (keeps working until done)
+  - bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/looper
 ---
 
 # My Personal Amplifier
@@ -33,6 +36,11 @@ A thin bundle combining amplifier-dev with persistent dev-memory capabilities.
 - Natural language: "remember this:", "what do you remember about X?"
 - Work tracking: "what was I working on?"
 - Token-efficient architecture (reads delegated to sub-agent)
+
+**From Looper:**
+- Supervised work loop tool
+- Keeps working until supervisor confirms completion
+- User input injection via `./looper-input.txt`
 
 ## Usage
 
