@@ -1,0 +1,88 @@
+#!/bin/bash
+# amp-restore-sessions - Restore previously saved Amplifier sessions
+# Opens VS Code windows for each session and resumes them
+
+set -e
+
+SAVE_FILE="$HOME/.amplifier/saved-sessions.json"
+TRIGGER_FILE="/tmp/.amp-autorun"
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Auto-detect WSL distribution name
+WSL_DISTRO=$(wsl.exe -l -q 2>/dev/null | head -1 | tr -d '\0\r' || echo "Ubuntu")
+
+# Check for flags
+DRY_RUN=false
+for arg in "$@"; do
+    case $arg in
+        --dry-run|-n)
+            DRY_RUN=true
+            ;;
+        --help|-h)
+            echo "Usage: amp-restore-sessions [OPTIONS]"
+            echo ""
+            echo "Restore previously saved Amplifier sessions in VS Code windows."
+            echo ""
+            echo "Options:"
+            echo "  -n, --dry-run    Show what would be done without executing"
+            echo "  -h, --help       Show this help message"
+            exit 0
+            ;;
+    esac
+done
+
+# Check if save file exists
+if [[ ! -f "$SAVE_FILE" ]]; then
+    echo -e "${RED}No saved sessions found.${NC}"
+    echo "Run 'amp-save-sessions' first to save your current sessions."
+    exit 1
+fi
+
+# Read and parse the save file
+sessions=$(cat "$SAVE_FILE")
+saved_at=$(echo "$sessions" | jq -r '.saved_at')
+count=$(echo "$sessions" | jq '.sessions | length')
+
+if [[ "$count" -eq 0 ]]; then
+    echo -e "${YELLOW}No sessions in save file.${NC}"
+    exit 0
+fi
+
+echo -e "${BLUE}Restoring $count session(s) saved at $saved_at${NC}"
+echo ""
+
+# Process each session
+while IFS= read -r session; do
+    session_id=$(echo "$session" | jq -r '.session_id')
+    directory=$(echo "$session" | jq -r '.directory')
+    
+    echo -e "  ${GREEN}→${NC} $directory"
+    echo -e "    Session: $session_id"
+    
+    if $DRY_RUN; then
+        continue
+    fi
+    
+    # Write trigger file with resume command
+    echo "amplifier session resume '$session_id'" > "$TRIGGER_FILE"
+    
+    # Open VS Code window
+    code --new-window --remote "wsl+$WSL_DISTRO" "$directory"
+    
+    # Wait for VS Code to pick up the trigger file
+    sleep 2
+    
+done < <(echo "$sessions" | jq -c '.sessions[]')
+
+echo ""
+if $DRY_RUN; then
+    echo -e "${YELLOW}Dry run - no sessions were restored.${NC}"
+else
+    echo -e "${GREEN}VS Code windows opened with sessions resuming.${NC}"
+fi

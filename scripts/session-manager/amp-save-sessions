@@ -1,0 +1,81 @@
+#!/bin/bash
+# amp-save-sessions - Save currently running Amplifier sessions for later restoration
+# Stores session IDs and working directories to ~/.amplifier/saved-sessions.json
+
+set -e
+
+SAVE_FILE="$HOME/.amplifier/saved-sessions.json"
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+echo -e "${BLUE}Scanning for running Amplifier sessions...${NC}"
+
+# Find all amplifier processes (excluding grep and this script)
+sessions=()
+while IFS= read -r pid; do
+    # Skip if not a valid PID
+    [[ -z "$pid" ]] && continue
+    
+    # Get the working directory
+    cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
+    
+    # Get the command line
+    cmdline=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ') || continue
+    
+    # Skip if this is just a subcommand or tool invocation, not an interactive session
+    if [[ "$cmdline" =~ "amplifier tool" ]] || [[ "$cmdline" =~ "amplifier session list" ]]; then
+        continue
+    fi
+    
+    # Extract session ID if resuming, otherwise try to find it from the project
+    if [[ "$cmdline" =~ resume[[:space:]]+([0-9a-f-]{36}) ]]; then
+        session_id="${BASH_REMATCH[1]}"
+    else
+        # For new sessions, find the most recent session for this project
+        # Convert cwd to project path format (replace / with -)
+        project_path=$(echo "$cwd" | sed 's|^/||; s|/|-|g; s|^|-|')
+        project_dir="$HOME/.amplifier/projects/$project_path/sessions"
+        
+        if [[ -d "$project_dir" ]]; then
+            # Find the most recently modified session
+            session_id=$(ls -t "$project_dir" 2>/dev/null | head -1)
+        else
+            session_id=""
+        fi
+    fi
+    
+    # Only save if we have both cwd and session_id
+    if [[ -n "$cwd" ]] && [[ -n "$session_id" ]]; then
+        sessions+=("{\"session_id\": \"$session_id\", \"directory\": \"$cwd\", \"pid\": $pid}")
+    fi
+done < <(pgrep -f 'amplifier$|amplifier run|amplifier session resume' 2>/dev/null)
+
+# Check if we found any sessions
+if [[ ${#sessions[@]} -eq 0 ]]; then
+    echo -e "${YELLOW}No running Amplifier sessions found.${NC}"
+    exit 0
+fi
+
+# Build JSON array
+json_array=$(printf '%s\n' "${sessions[@]}" | jq -s '.')
+
+# Add metadata
+timestamp=$(date -Iseconds)
+output=$(jq -n \
+    --arg ts "$timestamp" \
+    --argjson sessions "$json_array" \
+    '{saved_at: $ts, sessions: $sessions}')
+
+# Save to file
+echo "$output" > "$SAVE_FILE"
+
+# Display results
+echo -e "${GREEN}Saved ${#sessions[@]} session(s) to $SAVE_FILE${NC}"
+echo ""
+echo "$output" | jq -r '.sessions[] | "  \(.directory) → \(.session_id)"'
+echo ""
+echo -e "${BLUE}To restore these sessions later, run:${NC} amp-restore-sessions"

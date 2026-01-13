@@ -4,6 +4,14 @@ Personal collection of Amplifier recipes, bundles, and extensions.
 
 ## Contents
 
+### Scripts (`scripts/`)
+
+Utility scripts for Amplifier workflows.
+
+| Script | Description |
+|--------|-------------|
+| [`session-manager`](scripts/session-manager/) | Save and restore running Amplifier sessions across reboots (VS Code + WSL) |
+
 ### Bundles (`bundles/`)
 
 Custom bundle configurations and behaviors.
@@ -31,6 +39,18 @@ Domain-specific knowledge and patterns.
 **Usage:** Say "using code field principles, [task]" or "apply code field to this implementation"
 
 ## Usage
+
+### Using Scripts
+
+See individual script READMEs for installation and usage. Example:
+
+```bash
+# Save current Amplifier sessions before rebooting
+amp-save-sessions
+
+# Restore sessions after reboot
+amp-restore-sessions
+```
 
 ### Using Bundles
 
