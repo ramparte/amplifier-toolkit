@@ -14,6 +14,7 @@ agents:
   include:
     - deliberate-development:deliberate-planner
     - deliberate-development:deliberate-implementer
+    - deliberate-development:deliberate-reviewer
 ---
 
 # Deliberate Development

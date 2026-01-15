@@ -89,6 +89,16 @@ The implementation agent that builds from specifications:
 - Reports complete only when verified
 - Does NOT plan (requires specification input)
 
+### deliberate-reviewer
+
+The review agent that applies structural prevention principles:
+
+- Reviews PRs, code changes, and architectural decisions
+- Checks for anti-patterns (arbitrary thresholds, vague boundaries, etc.)
+- Applies "5 Whys" analysis for root cause assessment
+- Prefers structural prevention over runtime detection
+- Generates actionable recommendations
+
 ## Recipes
 
 ### deliberate-design
@@ -99,6 +109,14 @@ The implementation agent that builds from specifications:
 3. Check for generalization
 4. Create specification
 5. Implement with validation
+
+### deliberate-review
+
+Systematic principled review:
+1. Gather review context
+2. Structural prevention analysis
+3. Anti-pattern detection
+4. Generate recommendations
 
 ### feature-development
 

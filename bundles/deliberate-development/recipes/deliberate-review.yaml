@@ -1,0 +1,190 @@
+name: "deliberate-review"
+description: "Systematic review workflow applying structural prevention principles to PRs, code changes, or designs"
+version: "1.0.0"
+author: "Deliberate Development"
+tags: ["review", "pr", "code-review", "principles", "deliberate-development"]
+
+# This recipe applies review principles systematically:
+# 1. Understand what's being reviewed
+# 2. Check each principle (structural prevention, thresholds, boundaries, etc.)
+# 3. Apply 5 Whys analysis for root cause
+# 4. Generate actionable recommendations
+#
+# Usage:
+#   "Run the deliberate-review recipe for this PR"
+#   "Execute deliberate-review with target='PR #123'"
+#   "Review this code change using deliberate-review"
+
+context:
+  target: ""              # Required: What to review (PR URL, file path, or description)
+  target_type: "auto"     # Optional: pr, code, design, architecture (auto-detects)
+  focus_areas: ""         # Optional: Specific concerns to emphasize
+
+steps:
+  # Step 1: Gather context about what's being reviewed
+  - id: "gather-context"
+    agent: "foundation:explorer"
+    provider: "anthropic"
+    model: "claude-haiku"
+    prompt: |
+      GATHER REVIEW CONTEXT
+      =====================
+      
+      Target: {{target}}
+      Type: {{target_type}}
+      {{#if focus_areas}}
+      Focus areas: {{focus_areas}}
+      {{/if}}
+      
+      Gather context about what's being reviewed:
+      
+      1. If this is a PR URL, fetch and summarize the changes
+      2. If this is a file path, read and summarize the code
+      3. If this is a description, clarify what needs review
+      
+      Provide:
+      - What is being changed/proposed
+      - What problem it's trying to solve
+      - Key files or components involved
+      - Any stated rationale
+      
+      Keep it concise - this is context gathering, not the review.
+    output: "review_context"
+    timeout: 300
+
+  # Step 2: Structural prevention analysis
+  - id: "structural-analysis"
+    agent: "deliberate-development:deliberate-reviewer"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    prompt: |
+      STRUCTURAL PREVENTION ANALYSIS
+      ==============================
+      
+      Review context:
+      {{review_context}}
+      
+      Apply the core review principle: Structural Prevention vs Runtime Detection
+      
+      Analyze:
+      
+      1. **Prevention vs Detection**
+         - Does this PREVENT bad states or DETECT them after they occur?
+         - When does this solution act - before or after waste?
+      
+      2. **Failure Mode**
+         - Does it fail fast (seconds) or fail slow (hours)?
+         - What's the worst case if this fails?
+      
+      3. **Symptom vs Root Cause**
+         - Is this treating symptoms or root cause?
+         - Apply the "5 Whys" to trace to root cause
+      
+      Provide verdict: PASS / CONCERN / FAIL with clear reasoning.
+    output: "structural_analysis"
+    timeout: 300
+
+  # Step 3: Anti-pattern detection
+  - id: "antipattern-check"
+    agent: "deliberate-development:deliberate-reviewer"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    prompt: |
+      ANTI-PATTERN DETECTION
+      ======================
+      
+      Review context:
+      {{review_context}}
+      
+      Check for these anti-patterns:
+      
+      1. **Arbitrary Thresholds**
+         - Any magic numbers? (e.g., "after 20 reads", "limit to 5 retries")
+         - Are thresholds principled or arbitrary?
+         - Would fixing root cause eliminate need for thresholds?
+      
+      2. **Vague Boundaries**
+         - Are component/function responsibilities clear?
+         - Is there WHEN TO USE and WHEN NOT TO USE?
+         - Are prerequisites explicit or implicit?
+      
+      3. **Missing Specification Gates**
+         - Are inputs validated upfront?
+         - What happens if requirements are incomplete?
+         - Does it stop fast or continue with assumptions?
+      
+      4. **Detection Without Prevention**
+         - Any "log when X happens" without preventing X?
+         - Any monitoring that could be prevention instead?
+      
+      For each anti-pattern found, suggest the structural alternative.
+    output: "antipattern_analysis"
+    timeout: 300
+
+  # Step 4: Generate recommendations
+  - id: "recommendations"
+    agent: "deliberate-development:deliberate-reviewer"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    prompt: |
+      GENERATE REVIEW RECOMMENDATIONS
+      ===============================
+      
+      Review context:
+      {{review_context}}
+      
+      Structural analysis:
+      {{structural_analysis}}
+      
+      Anti-pattern analysis:
+      {{antipattern_analysis}}
+      
+      Generate the final review summary:
+      
+      ## Review Summary
+      
+      **Target:** {{target}}
+      **Overall Verdict:** [APPROVE / REQUEST CHANGES / NEEDS DISCUSSION]
+      
+      ### Principle Checklist
+      
+      | Principle | Status | Notes |
+      |-----------|--------|-------|
+      | Structural Prevention | [PASS/CONCERN/FAIL] | [Brief note] |
+      | No Arbitrary Thresholds | [PASS/CONCERN/FAIL] | [Brief note] |
+      | Clear Boundaries | [PASS/CONCERN/FAIL] | [Brief note] |
+      | Specification Gates | [PASS/CONCERN/FAIL] | [Brief note] |
+      | Root Cause Addressed | [PASS/CONCERN/FAIL] | [Brief note] |
+      
+      ### Key Findings
+      
+      1. [Most important finding with specific reference]
+      2. [Second finding]
+      3. [Third finding if applicable]
+      
+      ### Recommendations
+      
+      [Numbered list of specific, actionable recommendations]
+      
+      ### What's Good
+      
+      [Acknowledge what's done well - be specific]
+      
+      ---
+      
+      Be constructive. The goal is to improve the work, not just criticize.
+    output: "review_summary"
+    timeout: 300
+
+# Example execution:
+#
+# User: "Run deliberate-review for https://github.com/org/repo/pull/123"
+#
+# gather-context: Fetches PR, summarizes changes (2 min)
+# structural-analysis: Checks prevention vs detection (3 min)
+# antipattern-check: Scans for known anti-patterns (3 min)
+# recommendations: Generates actionable summary (3 min)
+#
+# Total: ~11 minutes for thorough principled review
+#
+# Output: Structured review with verdicts, findings, and recommendations
