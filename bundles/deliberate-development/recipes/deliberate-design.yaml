@@ -1,0 +1,217 @@
+name: "deliberate-design"
+description: "Multi-stage deliberate design workflow: decompose -> explore -> generalize -> specify -> implement"
+version: "1.0.0"
+author: "Deliberate Development"
+tags: ["design", "planning", "architecture", "deliberate-development"]
+
+# This recipe implements the core deliberate development pattern:
+# 1. Decompose the problem (understand what's really being asked)
+# 2. Explore alternatives (2-3 approaches with trade-offs)
+# 3. Look for generalization (could this be more broadly useful?)
+# 4. Create specification (clear contract for implementation)
+# 5. Implement and validate (one "go do it" with validation implicit)
+#
+# The key insight: leave room for the "oooh what else would be smart" moments
+# that only emerge through deliberate analysis.
+#
+# Typical runtime: 5-15 minutes depending on complexity
+# Required agents: deliberate-planner, deliberate-implementer, zen-architect
+#
+# Usage:
+#   "run the deliberate-design recipe for: [your feature description]"
+#   "execute deliberate-design with feature_description='Add caching layer'"
+
+context:
+  feature_description: ""  # Required: what needs to be designed/built
+  codebase_context: ""     # Optional: relevant paths or context
+  constraints: ""          # Optional: known constraints or requirements
+
+steps:
+  # Step 1: Decompose the problem
+  - id: "decompose"
+    agent: "deliberate-development:deliberate-planner"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    prompt: |
+      DECOMPOSE THIS PROBLEM
+      ======================
+      
+      Feature request: {{feature_description}}
+      
+      {{#if codebase_context}}
+      Codebase context: {{codebase_context}}
+      {{/if}}
+      
+      {{#if constraints}}
+      Known constraints: {{constraints}}
+      {{/if}}
+      
+      Please decompose this problem:
+      
+      1. **Restate the request** - What is actually being asked? What's the core need vs the stated solution?
+      
+      2. **Identify components** - What pieces make up this feature?
+      
+      3. **Map dependencies** - What does this depend on? What depends on this?
+      
+      4. **Define success** - How will we know it's done and working?
+      
+      Focus on UNDERSTANDING, not solving yet.
+    output: "problem_decomposition"
+    timeout: 300
+
+  # Step 2: Explore alternatives
+  - id: "explore"
+    agent: "deliberate-development:deliberate-planner"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    prompt: |
+      EXPLORE SOLUTION SPACE
+      ======================
+      
+      Problem decomposition:
+      {{problem_decomposition}}
+      
+      Now explore 2-3 alternative approaches:
+      
+      For each option, provide:
+      - **Approach**: How would this work?
+      - **Pros**: What are the benefits?
+      - **Cons**: What are the drawbacks?
+      - **Effort**: Low / Medium / High
+      - **Risk**: What could go wrong?
+      
+      Include at least:
+      - Option A: The most direct/obvious approach
+      - Option B: An alternative with different trade-offs
+      - Option C: A more generalized approach (if applicable)
+      
+      Do NOT recommend yet - just explore the space.
+    output: "solution_exploration"
+    timeout: 300
+
+  # Step 3: Look for generalization
+  - id: "generalize"
+    agent: "deliberate-development:deliberate-planner"
+    provider: "anthropic"
+    model: "claude-opus-*"  # Use opus for deeper thinking
+    prompt: |
+      GENERALIZATION ANALYSIS
+      =======================
+      
+      Original request: {{feature_description}}
+      
+      Problem decomposition:
+      {{problem_decomposition}}
+      
+      Solution options explored:
+      {{solution_exploration}}
+      
+      Now look for generalization opportunities:
+      
+      1. **Pattern recognition** - Is this a specific instance of a more general pattern?
+      
+      2. **Other use cases** - What else could benefit from a similar solution?
+      
+      3. **Abstraction opportunity** - Could this become a reusable component/mode/tool?
+      
+      4. **Cost-benefit** - Is generalizing worth the extra effort?
+      
+      Key questions:
+      - "What other modes/features might want this same capability?"
+      - "Is there an existing pattern we could extend?"
+      - "Would a configuration-driven approach be better than hard-coding?"
+      
+      This is the "oooh, what else would be smart" moment. Take time to think.
+      
+      Conclude with a recommendation: generalize or not, and why.
+    output: "generalization_analysis"
+    timeout: 600
+
+  # Step 4: Create specification
+  - id: "specify"
+    agent: "foundation:zen-architect"
+    mode: "ARCHITECT"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    prompt: |
+      CREATE IMPLEMENTATION SPECIFICATION
+      ===================================
+      
+      Original request: {{feature_description}}
+      
+      Problem decomposition:
+      {{problem_decomposition}}
+      
+      Solution options:
+      {{solution_exploration}}
+      
+      Generalization analysis:
+      {{generalization_analysis}}
+      
+      Based on the above analysis, create a clear implementation specification:
+      
+      ## Overview
+      [What will be built and why this approach]
+      
+      ## Components
+      For each component:
+      - Purpose
+      - Contract (inputs/outputs)
+      - Location (file paths)
+      - Dependencies
+      
+      ## Integration
+      - How components connect
+      - External touchpoints
+      
+      ## Test Strategy
+      - How to verify it works
+      - Key scenarios
+      
+      ## Success Criteria
+      - Definition of done
+      - Validation approach
+      
+      This specification should be complete enough that implementation
+      can proceed without further design decisions.
+    output: "implementation_spec"
+    timeout: 600
+
+  # Step 5: Implement and validate
+  - id: "implement"
+    agent: "deliberate-development:deliberate-implementer"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    prompt: |
+      IMPLEMENT FROM SPECIFICATION
+      ============================
+      
+      Original request: {{feature_description}}
+      
+      Implementation specification:
+      {{implementation_spec}}
+      
+      Now implement this specification:
+      
+      1. Build each component as specified
+      2. Validate as you go (don't leave validation for later)
+      3. Report what was created and how it was verified
+      
+      Remember: "done" means "verified working", not "code written".
+      
+      If you encounter issues that require re-planning, STOP and report
+      them rather than improvising a solution.
+    output: "implementation_result"
+    timeout: 900
+
+# Example output flow:
+#
+# decompose: Clear understanding of what's needed
+# explore: 2-3 options with trade-offs analyzed  
+# generalize: Decision on whether to generalize (the key insight step)
+# specify: Complete specification ready for implementation
+# implement: Working code with validation
+#
+# The generalization step is what makes this "deliberate" - 
+# it's where the "what else would be smart" insights emerge.

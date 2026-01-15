@@ -1,0 +1,25 @@
+bundle:
+  name: behavior-planning-mode
+  version: 1.0.0
+  description: Planning mode behavior - restricts tool usage and adds planning context when in planning mode
+
+# Context injection when planning mode is active
+context:
+  include:
+    - deliberate-development:context/planning-mode-instructions.md
+
+# Note: This behavior defines the CONCEPT of planning mode.
+# Actual mode switching would require a hook implementation.
+# For now, this provides the context and patterns for planning-focused work.
+
+# The planning mode concept:
+# - Visual indicator: [plan] > prompt
+# - Tool restrictions: warn on write operations
+# - Context injection: planning-specific instructions
+# - Command toggle: /plan to enter/exit
+
+# Future hook implementation would:
+# 1. Intercept tool calls
+# 2. Check if in planning mode
+# 3. If write operation: warn/block first attempt, allow second
+# 4. Inject mode context into system prompt

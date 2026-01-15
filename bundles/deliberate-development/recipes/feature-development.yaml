@@ -1,0 +1,332 @@
+name: "feature-development"
+description: "Full feature development lifecycle: workspace setup -> deliberate design -> implementation -> validation -> cleanup"
+version: "1.0.0"
+author: "Deliberate Development"
+tags: ["feature", "workflow", "full-lifecycle", "deliberate-development"]
+
+# This recipe implements the full deliberate development lifecycle:
+#
+# 1. Workspace Setup - Create focused workspace for the task
+# 2. Context Gathering - Understand relevant codebase areas
+# 3. Deliberate Design - Decompose, explore, generalize, specify
+# 4. Implementation - Build with validation implicit
+# 5. Validation - Kick the tires in real usage
+# 6. Cleanup - Document and prepare for workspace destruction
+#
+# This mirrors the workflow pattern:
+# - Fresh workspace per task
+# - Thorough planning before implementation
+# - Validation is implicit, not separate
+# - Workspace is throwaway, knowledge persists
+#
+# Typical runtime: 15-45 minutes depending on feature complexity
+# Best for: Medium-sized features that warrant full deliberate treatment
+#
+# Usage:
+#   "run the feature-development recipe for: [feature description]"
+#   "execute feature-development with feature_name='plan-mode' repo='amplifier-app-cli'"
+
+context:
+  feature_name: ""         # Required: name for this feature (used for workspace)
+  feature_description: ""  # Required: what the feature should do
+  repo: ""                 # Optional: primary repo to work in
+  related_repos: ""        # Optional: other repos that may be relevant
+  constraints: ""          # Optional: known constraints or requirements
+
+steps:
+  # Step 1: Workspace context setup
+  - id: "setup-context"
+    agent: "foundation:explorer"
+    provider: "anthropic"
+    model: "claude-haiku"
+    prompt: |
+      WORKSPACE CONTEXT SETUP
+      =======================
+      
+      Feature: {{feature_name}}
+      Description: {{feature_description}}
+      
+      {{#if repo}}
+      Primary repo: {{repo}}
+      {{/if}}
+      
+      {{#if related_repos}}
+      Related repos: {{related_repos}}
+      {{/if}}
+      
+      Gather context for this feature development:
+      
+      1. **Identify relevant files** - What existing code relates to this feature?
+      
+      2. **Find patterns** - Are there similar features we can learn from?
+      
+      3. **Note dependencies** - What will this feature interact with?
+      
+      4. **Check for conflicts** - Is anything else touching this area?
+      
+      Provide a concise context summary (not exhaustive exploration).
+    output: "workspace_context"
+    timeout: 300
+
+  # Step 2: Problem decomposition
+  - id: "decompose"
+    agent: "deliberate-development:deliberate-planner"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    prompt: |
+      PROBLEM DECOMPOSITION
+      =====================
+      
+      Feature: {{feature_name}}
+      Description: {{feature_description}}
+      
+      {{#if constraints}}
+      Constraints: {{constraints}}
+      {{/if}}
+      
+      Workspace context:
+      {{workspace_context}}
+      
+      Decompose this feature:
+      
+      1. **Core need** - What is the essential problem being solved?
+      
+      2. **Components** - What pieces make up this feature?
+      
+      3. **User story** - How will users interact with this?
+      
+      4. **Success criteria** - How do we know it's done?
+      
+      5. **Scope boundaries** - What's explicitly NOT included?
+    output: "decomposition"
+    timeout: 300
+
+  # Step 3: Solution exploration
+  - id: "explore-solutions"
+    agent: "deliberate-development:deliberate-planner"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    prompt: |
+      SOLUTION EXPLORATION
+      ====================
+      
+      Feature: {{feature_name}}
+      
+      Decomposition:
+      {{decomposition}}
+      
+      Explore 2-3 approaches:
+      
+      For each, provide:
+      - Approach summary
+      - Implementation complexity (Low/Medium/High)
+      - Integration complexity (Low/Medium/High)
+      - Pros and cons
+      - Risk factors
+      
+      Consider:
+      - Direct implementation vs. generalized solution
+      - Building new vs. extending existing
+      - Configuration-driven vs. hard-coded
+    output: "solution_exploration"
+    timeout: 300
+
+  # Step 4: Generalization check (the key insight step)
+  - id: "generalization-check"
+    agent: "deliberate-development:deliberate-planner"
+    provider: "anthropic"
+    model: "claude-opus-*"
+    prompt: |
+      GENERALIZATION CHECK
+      ====================
+      
+      Feature: {{feature_name}}
+      Description: {{feature_description}}
+      
+      Decomposition:
+      {{decomposition}}
+      
+      Solutions explored:
+      {{solution_exploration}}
+      
+      This is the "oooh, what else would be smart" moment.
+      
+      Consider:
+      
+      1. **Is this a pattern?** - Could other features use similar approach?
+      
+      2. **Mode potential** - Could this become a "mode" (command + instruction + rules)?
+      
+      3. **Reuse opportunity** - Should this be a shared component?
+      
+      4. **Configuration vs code** - Could this be data-driven?
+      
+      5. **Future extensions** - What might want to build on this?
+      
+      Recommendation: Should we generalize? How much? Why or why not?
+      
+      Be honest about over-engineering risk vs. legitimate reuse value.
+    output: "generalization_decision"
+    timeout: 600
+
+  # Step 5: Create specification
+  - id: "create-spec"
+    agent: "foundation:zen-architect"
+    mode: "ARCHITECT"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    prompt: |
+      CREATE FEATURE SPECIFICATION
+      ============================
+      
+      Feature: {{feature_name}}
+      Description: {{feature_description}}
+      
+      Analysis results:
+      - Decomposition: {{decomposition}}
+      - Solutions explored: {{solution_exploration}}
+      - Generalization decision: {{generalization_decision}}
+      
+      Create a complete implementation specification:
+      
+      ## Feature: {{feature_name}}
+      
+      ### Overview
+      [What and why]
+      
+      ### Components
+      [Each component with purpose, contract, location]
+      
+      ### Implementation Order
+      [What to build first, second, etc.]
+      
+      ### Integration Points
+      [How this connects to existing code]
+      
+      ### Test Plan
+      [How to verify each component and the whole]
+      
+      ### Definition of Done
+      [Specific, verifiable criteria]
+    output: "feature_spec"
+    timeout: 600
+
+  # Step 6: Implementation
+  - id: "implement"
+    agent: "deliberate-development:deliberate-implementer"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    prompt: |
+      IMPLEMENT FEATURE
+      =================
+      
+      Feature: {{feature_name}}
+      
+      Specification:
+      {{feature_spec}}
+      
+      Implement this feature following the specification exactly.
+      
+      Remember:
+      - Validation is implicit - verify as you build
+      - Complete each component before moving on
+      - No TODOs or placeholders
+      - Report issues rather than improvising
+      
+      Provide:
+      1. What was created (files, components)
+      2. How it was validated
+      3. Any issues encountered
+    output: "implementation_result"
+    timeout: 900
+
+  # Step 7: Integration validation
+  - id: "validate"
+    agent: "foundation:zen-architect"
+    mode: "REVIEW"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    prompt: |
+      VALIDATE FEATURE
+      ================
+      
+      Feature: {{feature_name}}
+      
+      Specification:
+      {{feature_spec}}
+      
+      Implementation result:
+      {{implementation_result}}
+      
+      Validate this implementation:
+      
+      1. **Spec compliance** - Does it match the specification?
+      
+      2. **Integration** - Does it work with existing code?
+      
+      3. **Edge cases** - Were important edge cases handled?
+      
+      4. **Quality** - Code quality, no placeholders, proper tests?
+      
+      5. **Documentation** - Is it clear how to use this?
+      
+      Provide:
+      - PASS/FAIL verdict
+      - Issues found (if any)
+      - Recommendations for improvement (if any)
+    output: "validation_result"
+    timeout: 300
+
+  # Step 8: Summary for handoff
+  - id: "summarize"
+    agent: "foundation:explorer"
+    provider: "anthropic"
+    model: "claude-haiku"
+    prompt: |
+      FEATURE DEVELOPMENT SUMMARY
+      ===========================
+      
+      Feature: {{feature_name}}
+      Description: {{feature_description}}
+      
+      Implementation: {{implementation_result}}
+      Validation: {{validation_result}}
+      
+      Create a brief summary for handoff:
+      
+      ## What Was Built
+      [Components created]
+      
+      ## Key Decisions Made
+      [Important choices and why]
+      
+      ## How to Use
+      [Brief usage guide]
+      
+      ## What's Next
+      [Follow-up tasks if any]
+      
+      ## Workspace Cleanup Notes
+      [What to preserve vs discard]
+      
+      Keep it concise - this is for documentation, not exploration.
+    output: "feature_summary"
+    timeout: 120
+
+# Example execution flow:
+#
+# setup-context: Quick survey of relevant code (5 min)
+# decompose: Break down the feature (5 min)
+# explore-solutions: 2-3 options analyzed (5 min)
+# generalization-check: Key insight moment (10 min with opus)
+# create-spec: Complete specification (10 min)
+# implement: Build with validation (15-30 min)
+# validate: Verify it works (5 min)
+# summarize: Document for handoff (2 min)
+#
+# Total: ~45 minutes for a medium feature
+#
+# After completion:
+# - Push changes to real repos
+# - Destroy workspace
+# - Session history preserved in ~/.amplifier/projects
