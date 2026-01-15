@@ -17,6 +17,9 @@ includes:
   
   # Looper - supervised work loop (keeps working until done)
   - bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/looper
+  
+  # Deliberate development - decomposition-first workflow
+  - bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/deliberate-development
 ---
 
 # My Personal Amplifier
@@ -41,6 +44,12 @@ A thin bundle combining amplifier-dev with persistent dev-memory capabilities.
 - Supervised work loop tool
 - Keeps working until supervisor confirms completion
 - User input injection via `./looper-input.txt`
+
+**From Deliberate Development:**
+- Decomposition-first planning (deliberate-planner agent)
+- Specification-based implementation (deliberate-implementer agent)
+- Recipes: deliberate-design, feature-development
+- "4-5 planning turns, then one go-do-it turn" philosophy
 
 ## Usage
 
