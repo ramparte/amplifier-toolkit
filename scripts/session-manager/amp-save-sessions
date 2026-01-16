@@ -1,5 +1,6 @@
 #!/bin/bash
-# amp-save-sessions - Save currently running Amplifier sessions for later restoration
+# amp-save-sessions - Save Amplifier sessions from open VS Code WSL terminals
+# Finds VS Code terminal windows and looks up their most recent amplifier sessions
 # Appends session snapshots to ~/.amplifier/session-history.json with numbered entries
 
 set -e
@@ -10,53 +11,71 @@ HISTORY_FILE="$HOME/.amplifier/session-history.json"
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}Scanning for running Amplifier sessions...${NC}"
+echo -e "${BLUE}Scanning for VS Code WSL terminals with Amplifier sessions...${NC}"
 
-# Find all amplifier processes (excluding grep and this script)
+# Find VS Code terminal bash shells by looking for the shellIntegration init file
+# This finds all open VS Code terminal windows, regardless of whether amplifier is running
+declare -A seen_dirs  # Track unique directories
 sessions=()
+
 while IFS= read -r pid; do
-    # Skip if not a valid PID
     [[ -z "$pid" ]] && continue
     
     # Get the working directory
     cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
     
-    # Get the command line
-    cmdline=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ') || continue
+    # Skip if we've already processed this directory
+    [[ -n "${seen_dirs[$cwd]}" ]] && continue
+    seen_dirs[$cwd]=1
     
-    # Skip if this is just a subcommand or tool invocation, not an interactive session
-    if [[ "$cmdline" =~ "amplifier tool" ]] || [[ "$cmdline" =~ "amplifier session list" ]]; then
-        continue
-    fi
+    # Convert cwd to project path format (replace / with -)
+    project_path=$(echo "$cwd" | sed 's|^/||; s|/|-|g; s|^|-|')
+    project_dir="$HOME/.amplifier/projects/$project_path/sessions"
     
-    # Extract session ID if resuming, otherwise try to find it from the project
-    if [[ "$cmdline" =~ resume[[:space:]]+([0-9a-f-]{36}) ]]; then
-        session_id="${BASH_REMATCH[1]}"
-    else
-        # For new sessions, find the most recent session for this project
-        # Convert cwd to project path format (replace / with -)
-        project_path=$(echo "$cwd" | sed 's|^/||; s|/|-|g; s|^|-|')
-        project_dir="$HOME/.amplifier/projects/$project_path/sessions"
+    # Skip if no sessions directory for this project
+    [[ ! -d "$project_dir" ]] && continue
+    
+    # Find the most recent root session (UUID only, not sub-agent sessions with underscores)
+    # Root sessions are 36-char UUIDs, sub-sessions have _suffix
+    session_id=""
+    latest_time=0
+    
+    for session_dir in "$project_dir"/*/; do
+        [[ ! -d "$session_dir" ]] && continue
         
-        if [[ -d "$project_dir" ]]; then
-            # Find the most recently modified session
-            session_id=$(ls -t "$project_dir" 2>/dev/null | head -1)
-        else
-            session_id=""
+        # Get just the directory name
+        dir_name=$(basename "$session_dir")
+        
+        # Skip sub-agent sessions (they contain underscore after UUID)
+        # Root sessions are exactly 36 chars (UUID format: 8-4-4-4-12)
+        if [[ ${#dir_name} -eq 36 ]] && [[ "$dir_name" =~ ^[0-9a-f-]+$ ]]; then
+            # Get modification time
+            mod_time=$(stat -c %Y "$session_dir" 2>/dev/null) || continue
+            
+            if [[ $mod_time -gt $latest_time ]]; then
+                latest_time=$mod_time
+                session_id="$dir_name"
+            fi
         fi
-    fi
+    done
     
-    # Only save if we have both cwd and session_id
-    if [[ -n "$cwd" ]] && [[ -n "$session_id" ]]; then
-        sessions+=("{\"session_id\": \"$session_id\", \"directory\": \"$cwd\", \"pid\": $pid}")
+    # Only save if we found a session
+    if [[ -n "$session_id" ]]; then
+        sessions+=("{\"session_id\": \"$session_id\", \"directory\": \"$cwd\", \"terminal_pid\": $pid}")
+        echo -e "  ${CYAN}Found:${NC} $cwd"
     fi
-done < <(pgrep -f 'amplifier$|amplifier run|amplifier session resume' 2>/dev/null)
+done < <(pgrep -f 'shellIntegration-bash' 2>/dev/null)
 
 # Check if we found any sessions
 if [[ ${#sessions[@]} -eq 0 ]]; then
-    echo -e "${YELLOW}No running Amplifier sessions found.${NC}"
+    echo -e "${YELLOW}No VS Code terminals with Amplifier sessions found.${NC}"
+    echo ""
+    echo "Tips:"
+    echo "  - Make sure you have VS Code WSL terminals open"
+    echo "  - The terminal's working directory must have had an amplifier session"
     exit 0
 fi
 
@@ -91,9 +110,10 @@ updated_history=$(echo "$current_history" | jq \
 echo "$updated_history" > "$HISTORY_FILE"
 
 # Display results
+echo ""
 echo -e "${GREEN}Saved ${#sessions[@]} session(s) as save #${next_id}${NC}"
 echo ""
-echo "$json_sessions" | jq -r '.[] | "  \(.directory) → \(.session_id)"'
+echo "$json_sessions" | jq -r '.[] | "  \(.directory) -> \(.session_id)"'
 echo ""
 echo -e "${BLUE}History now contains $(echo "$updated_history" | jq '.saves | length') save(s)${NC}"
 echo -e "To restore, run: ${GREEN}amp-restore-sessions${NC} (latest) or ${GREEN}amp-restore-sessions --list${NC} (pick one)"
