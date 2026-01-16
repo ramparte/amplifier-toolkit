@@ -1,10 +1,10 @@
 #!/bin/bash
 # amp-save-sessions - Save currently running Amplifier sessions for later restoration
-# Stores session IDs and working directories to ~/.amplifier/saved-sessions.json
+# Appends session snapshots to ~/.amplifier/session-history.json with numbered entries
 
 set -e
 
-SAVE_FILE="$HOME/.amplifier/saved-sessions.json"
+HISTORY_FILE="$HOME/.amplifier/session-history.json"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -60,22 +60,40 @@ if [[ ${#sessions[@]} -eq 0 ]]; then
     exit 0
 fi
 
-# Build JSON array
-json_array=$(printf '%s\n' "${sessions[@]}" | jq -s '.')
+# Build JSON array of sessions
+json_sessions=$(printf '%s\n' "${sessions[@]}" | jq -s '.')
 
-# Add metadata
+# Get current timestamp
 timestamp=$(date -Iseconds)
-output=$(jq -n \
-    --arg ts "$timestamp" \
-    --argjson sessions "$json_array" \
-    '{saved_at: $ts, sessions: $sessions}')
 
-# Save to file
-echo "$output" > "$SAVE_FILE"
+# Initialize history file if it doesn't exist
+if [[ ! -f "$HISTORY_FILE" ]]; then
+    echo '{"saves": [], "next_id": 1}' > "$HISTORY_FILE"
+fi
+
+# Read current history and get next ID
+current_history=$(cat "$HISTORY_FILE")
+next_id=$(echo "$current_history" | jq -r '.next_id')
+
+# Create the new save entry
+new_entry=$(jq -n \
+    --arg id "$next_id" \
+    --arg ts "$timestamp" \
+    --argjson sessions "$json_sessions" \
+    '{id: ($id | tonumber), saved_at: $ts, sessions: $sessions}')
+
+# Append to history and increment next_id
+updated_history=$(echo "$current_history" | jq \
+    --argjson entry "$new_entry" \
+    '.saves += [$entry] | .next_id += 1')
+
+# Save updated history
+echo "$updated_history" > "$HISTORY_FILE"
 
 # Display results
-echo -e "${GREEN}Saved ${#sessions[@]} session(s) to $SAVE_FILE${NC}"
+echo -e "${GREEN}Saved ${#sessions[@]} session(s) as save #${next_id}${NC}"
 echo ""
-echo "$output" | jq -r '.sessions[] | "  \(.directory) → \(.session_id)"'
+echo "$json_sessions" | jq -r '.[] | "  \(.directory) → \(.session_id)"'
 echo ""
-echo -e "${BLUE}To restore these sessions later, run:${NC} amp-restore-sessions"
+echo -e "${BLUE}History now contains $(echo "$updated_history" | jq '.saves | length') save(s)${NC}"
+echo -e "To restore, run: ${GREEN}amp-restore-sessions${NC} (latest) or ${GREEN}amp-restore-sessions --list${NC} (pick one)"

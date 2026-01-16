@@ -4,7 +4,7 @@
 
 set -e
 
-SAVE_FILE="$HOME/.amplifier/saved-sessions.json"
+HISTORY_FILE="$HOME/.amplifier/session-history.json"
 TRIGGER_FILE="/tmp/.amp-autorun"
 
 # Colors for output
@@ -12,17 +12,31 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 # Auto-detect WSL distribution name
 WSL_DISTRO=$(wsl.exe -l -q 2>/dev/null | head -1 | tr -d '\0\r' || echo "Ubuntu")
 
-# Check for flags
+# Parse arguments
 DRY_RUN=false
-for arg in "$@"; do
-    case $arg in
+LIST_MODE=false
+SELECTED_ID=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
         --dry-run|-n)
             DRY_RUN=true
+            shift
+            ;;
+        --list|-l)
+            LIST_MODE=true
+            shift
+            ;;
+        --id)
+            SELECTED_ID="$2"
+            shift 2
             ;;
         --help|-h)
             echo "Usage: amp-restore-sessions [OPTIONS]"
@@ -30,31 +44,95 @@ for arg in "$@"; do
             echo "Restore previously saved Amplifier sessions in VS Code windows."
             echo ""
             echo "Options:"
+            echo "  -l, --list       List all saved session groups and pick one"
+            echo "  --id <N>         Restore a specific save by ID"
             echo "  -n, --dry-run    Show what would be done without executing"
             echo "  -h, --help       Show this help message"
+            echo ""
+            echo "By default, restores the most recent save."
             exit 0
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            echo "Use --help for usage information."
+            exit 1
             ;;
     esac
 done
 
-# Check if save file exists
-if [[ ! -f "$SAVE_FILE" ]]; then
-    echo -e "${RED}No saved sessions found.${NC}"
+# Check if history file exists
+if [[ ! -f "$HISTORY_FILE" ]]; then
+    echo -e "${RED}No session history found.${NC}"
     echo "Run 'amp-save-sessions' first to save your current sessions."
     exit 1
 fi
 
-# Read and parse the save file
-sessions=$(cat "$SAVE_FILE")
-saved_at=$(echo "$sessions" | jq -r '.saved_at')
-count=$(echo "$sessions" | jq '.sessions | length')
+# Read history
+history=$(cat "$HISTORY_FILE")
+save_count=$(echo "$history" | jq '.saves | length')
 
-if [[ "$count" -eq 0 ]]; then
-    echo -e "${YELLOW}No sessions in save file.${NC}"
+if [[ "$save_count" -eq 0 ]]; then
+    echo -e "${YELLOW}No saves in history.${NC}"
     exit 0
 fi
 
-echo -e "${BLUE}Restoring $count session(s) saved at $saved_at${NC}"
+# Function to display a save entry
+display_save() {
+    local save="$1"
+    local id=$(echo "$save" | jq -r '.id')
+    local saved_at=$(echo "$save" | jq -r '.saved_at')
+    local session_count=$(echo "$save" | jq '.sessions | length')
+    
+    # Format the timestamp nicely
+    local formatted_date=$(date -d "$saved_at" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$saved_at")
+    
+    echo -e "  ${CYAN}#${id}${NC} - ${formatted_date} (${session_count} session(s))"
+    echo "$save" | jq -r '.sessions[] | "      \(.directory)"'
+}
+
+# List mode: show all saves and let user pick
+if $LIST_MODE; then
+    echo -e "${BLUE}${BOLD}Saved Session Groups:${NC}"
+    echo ""
+    
+    # Display all saves (newest first)
+    echo "$history" | jq -c '.saves | reverse | .[]' | while read -r save; do
+        display_save "$save"
+        echo ""
+    done
+    
+    echo -e "${BLUE}Enter save ID to restore (or 'q' to quit):${NC} "
+    read -r choice
+    
+    if [[ "$choice" == "q" ]] || [[ -z "$choice" ]]; then
+        echo "Cancelled."
+        exit 0
+    fi
+    
+    SELECTED_ID="$choice"
+fi
+
+# Determine which save to restore
+if [[ -n "$SELECTED_ID" ]]; then
+    # User specified an ID
+    selected_save=$(echo "$history" | jq --arg id "$SELECTED_ID" '.saves[] | select(.id == ($id | tonumber))')
+    if [[ -z "$selected_save" ]]; then
+        echo -e "${RED}Save #${SELECTED_ID} not found.${NC}"
+        echo "Use --list to see available saves."
+        exit 1
+    fi
+else
+    # Default: get the most recent save (last in array)
+    selected_save=$(echo "$history" | jq '.saves | last')
+fi
+
+# Extract save details
+save_id=$(echo "$selected_save" | jq -r '.id')
+saved_at=$(echo "$selected_save" | jq -r '.saved_at')
+session_count=$(echo "$selected_save" | jq '.sessions | length')
+
+echo -e "${BLUE}Restoring save #${save_id} from ${saved_at}${NC}"
+echo -e "${BLUE}(${session_count} session(s))${NC}"
 echo ""
 
 # Process each session
@@ -78,7 +156,7 @@ while IFS= read -r session; do
     # Wait for VS Code to pick up the trigger file
     sleep 2
     
-done < <(echo "$sessions" | jq -c '.sessions[]')
+done < <(echo "$selected_save" | jq -c '.sessions[]')
 
 echo ""
 if $DRY_RUN; then
