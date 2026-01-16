@@ -38,6 +38,14 @@ Domain-specific knowledge and patterns.
 
 **Usage:** Say "using code field principles, [task]" or "apply code field to this implementation"
 
+### Tools (`tools/`)
+
+Standalone tools and integrations for Amplifier.
+
+| Tool | Description |
+|------|-------------|
+| [`voice-bridge`](tools/voice-bridge/) | Control Amplifier sessions via voice from iPhone using Siri Shortcuts - discovers sessions, parses natural language commands, returns voice-friendly responses |
+
 ## Usage
 
 ### Using Scripts
