@@ -1,25 +1,17 @@
-"""Amplifier session bridge for voice commands.
+"""Amplifier execution bridge using subprocess.
 
-This module creates and manages Amplifier sessions for executing voice commands.
-It can either run fresh prompts or continue existing sessions by loading their
-transcript as conversation context.
+Uses `amplifier run` CLI for execution - avoids Python environment issues
+that occur when trying to load bundles programmatically.
 """
 
 import asyncio
 import json
-import os
+import re
+import shutil
+import subprocess
+import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional
-
-# Try to import Amplifier - graceful fallback if not available
-try:
-    from amplifier_foundation import load_bundle
-
-    AMPLIFIER_AVAILABLE = True
-except ImportError:
-    AMPLIFIER_AVAILABLE = False
-    load_bundle = None
 
 from .session_discovery import SessionDiscovery, SessionState
 
@@ -35,157 +27,136 @@ class BridgeResponse:
     error: Optional[str] = None
 
 
-class AmplifierBridge:
-    """Bridge between voice commands and Amplifier sessions."""
+def is_amplifier_available() -> bool:
+    """Check if the amplifier CLI is available."""
+    return shutil.which("amplifier") is not None
 
-    def __init__(self, bundle_path: Optional[str] = None):
+
+class AmplifierBridge:
+    """Bridge to Amplifier using subprocess execution.
+
+    This approach avoids Python environment issues by using the CLI.
+    """
+
+    def __init__(self, bundle: Optional[str] = None, timeout: int = 120):
         """Initialize the bridge.
 
         Args:
-            bundle_path: Path to the bundle to use. If None, uses default.
+            bundle: Bundle name or path (optional, uses default if not set)
+            timeout: Execution timeout in seconds
         """
-        self.bundle_path = bundle_path
+        self.bundle = bundle
+        self.timeout = timeout
         self.discovery = SessionDiscovery()
-        self._session = None
-        self._bundle = None
-        self._prepared = None
-        self._initialized = False
-        self._loop = None
 
-    async def initialize(self) -> bool:
-        """Initialize the Amplifier session.
-
-        Returns:
-            True if initialization succeeded, False otherwise.
-        """
-        if not AMPLIFIER_AVAILABLE or load_bundle is None:
-            return False
-
-        if self._initialized:
-            return True
-
-        try:
-            # Load the bundle (load_bundle is guaranteed non-None here)
-            if self.bundle_path:
-                self._bundle = await load_bundle(self.bundle_path)
-            else:
-                # Use the default amplifier-dev bundle or foundation
-                # Try to find an appropriate bundle
-                home = Path.home()
-                candidates = [
-                    home / ".amplifier" / "cache" / "amplifier-foundation-*",
-                    "/mnt/c/ANext/my-amplifier",
-                ]
-                for pattern in candidates:
-                    matches = list(Path("/").glob(str(pattern).lstrip("/")))
-                    if matches:
-                        self._bundle = await load_bundle(str(matches[0]))
-                        break
-
-                if not self._bundle:
-                    # Fallback: try loading foundation directly
-                    self._bundle = await load_bundle("amplifier-foundation")
-
-            if not self._bundle:
-                return False
-
-            # Prepare the bundle
-            self._prepared = await self._bundle.prepare()
-            self._initialized = True
-            return True
-
-        except Exception as e:
-            print(f"Failed to initialize Amplifier: {e}")
-            return False
-
-    async def execute(
+    def execute(
         self,
         prompt: str,
         continue_session: Optional[str] = None,
         working_directory: Optional[str] = None,
     ) -> BridgeResponse:
-        """Execute a prompt, optionally continuing an existing session.
+        """Execute a prompt via amplifier CLI.
 
         Args:
-            prompt: The prompt to execute.
-            continue_session: Session ID or project name to continue.
-            working_directory: Working directory for the session.
+            prompt: The prompt to execute
+            continue_session: Session hint to load context from
+            working_directory: Directory to run in
 
         Returns:
-            BridgeResponse with the result.
+            BridgeResponse with the result
         """
-        start_time = asyncio.get_event_loop().time()
+        start_time = time.time()
 
-        if not AMPLIFIER_AVAILABLE:
+        if not is_amplifier_available():
             return BridgeResponse(
-                text="Amplifier is not available. Install amplifier-foundation.",
+                text="Amplifier CLI not found. Install with: uv tool install amplifier",
                 success=False,
-                error="amplifier_not_available",
+                error="cli_not_found",
             )
 
-        if not self._initialized:
-            if not await self.initialize():
-                return BridgeResponse(
-                    text="Failed to initialize Amplifier session.",
-                    success=False,
-                    error="initialization_failed",
-                )
+        # Build the full prompt with context if continuing
+        full_prompt = prompt
+        if continue_session:
+            context = self._build_context(continue_session)
+            if context:
+                full_prompt = f"{context}\n\nUser request: {prompt}"
+
+        # Determine working directory
+        cwd = working_directory
+        if not cwd and continue_session:
+            session = self._find_session(continue_session)
+            if session and session.directory:
+                cwd = session.directory
+
+        # Build command
+        cmd = ["amplifier", "run"]
+        if self.bundle:
+            cmd.extend(["--bundle", self.bundle])
+        cmd.append(full_prompt)
 
         try:
-            # Build the full prompt with context if continuing a session
-            full_prompt = prompt
-            target_session = None
-
-            if continue_session:
-                target_session = self._find_session(continue_session)
-                if target_session:
-                    context = self._load_session_context(target_session)
-                    if context:
-                        full_prompt = f"{context}\n\nUser: {prompt}"
-
-            # Create a session and execute
-            if self._prepared is None:
-                return BridgeResponse(
-                    text="Bridge not properly initialized.",
-                    success=False,
-                    error="not_prepared",
-                )
-            session = await self._prepared.create_session()
-
-            # Set working directory if specified
-            if working_directory:
-                os.chdir(working_directory)
-            elif target_session and target_session.directory:
-                os.chdir(target_session.directory)
-
-            async with session:
-                response = await session.execute(full_prompt)
-
-            elapsed = asyncio.get_event_loop().time() - start_time
-
-            return BridgeResponse(
-                text=response,
-                success=True,
-                session_id=target_session.session_id if target_session else None,
-                execution_time=elapsed,
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+                cwd=cwd,
             )
 
-        except Exception as e:
-            elapsed = asyncio.get_event_loop().time() - start_time
+            elapsed = time.time() - start_time
+
+            if result.returncode == 0:
+                # Clean up the output (remove ANSI codes, etc.)
+                output = self._clean_output(result.stdout)
+                return BridgeResponse(
+                    text=output,
+                    success=True,
+                    execution_time=elapsed,
+                )
+            else:
+                error_msg = result.stderr.strip() or result.stdout.strip()
+                return BridgeResponse(
+                    text=f"Execution failed: {error_msg[:200]}",
+                    success=False,
+                    error="execution_failed",
+                    execution_time=elapsed,
+                )
+
+        except subprocess.TimeoutExpired:
             return BridgeResponse(
-                text=f"Error executing prompt: {e}",
+                text=f"Request timed out after {self.timeout} seconds",
+                success=False,
+                error="timeout",
+                execution_time=self.timeout,
+            )
+        except Exception as e:
+            return BridgeResponse(
+                text=f"Error: {e}",
                 success=False,
                 error=str(e),
-                execution_time=elapsed,
+                execution_time=time.time() - start_time,
             )
 
+    async def execute_async(
+        self,
+        prompt: str,
+        continue_session: Optional[str] = None,
+        working_directory: Optional[str] = None,
+    ) -> BridgeResponse:
+        """Async version of execute."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.execute(prompt, continue_session, working_directory),
+        )
+
     def _find_session(self, hint: str) -> Optional[SessionState]:
-        """Find a session by ID or project name hint."""
+        """Find a session by ID or project name."""
         sessions = self.discovery.discover_sessions()
 
-        # Try exact session ID match first
+        # Try exact ID match
         for s in sessions:
-            if s.session_id == hint:
+            if s.session_id == hint or s.session_id.startswith(hint):
                 return s
 
         # Try project name match
@@ -193,24 +164,16 @@ class AmplifierBridge:
         for s in sessions:
             if hint_lower in s.project_name.lower():
                 return s
-            if hint_lower in s.directory.lower():
-                return s
 
         return None
 
-    def _load_session_context(
-        self, session: SessionState, max_messages: int = 10
-    ) -> Optional[str]:
-        """Load conversation context from a session's transcript.
+    def _build_context(self, session_hint: str, max_messages: int = 5) -> Optional[str]:
+        """Build conversation context from an existing session."""
+        session = self._find_session(session_hint)
+        if not session or not session.transcript_path:
+            return None
 
-        Args:
-            session: The session to load context from.
-            max_messages: Maximum number of messages to include.
-
-        Returns:
-            Formatted context string, or None if unavailable.
-        """
-        if not session.transcript_path or not session.transcript_path.exists():
+        if not session.transcript_path.exists():
             return None
 
         try:
@@ -221,22 +184,8 @@ class AmplifierBridge:
                         msg = json.loads(line)
                         role = msg.get("role")
                         content = msg.get("content")
-
                         if role and content:
-                            # Extract text content
-                            if isinstance(content, str):
-                                text = content
-                            elif isinstance(content, list):
-                                # Find text blocks
-                                text_parts = []
-                                for block in content:
-                                    if isinstance(block, dict):
-                                        if block.get("type") == "text":
-                                            text_parts.append(block.get("text", ""))
-                                text = "\n".join(text_parts)
-                            else:
-                                continue
-
+                            text = self._extract_text(content)
                             if text:
                                 messages.append({"role": role, "content": text})
                     except json.JSONDecodeError:
@@ -245,53 +194,67 @@ class AmplifierBridge:
             if not messages:
                 return None
 
-            # Take last N messages
             recent = messages[-max_messages:]
-
-            # Format as conversation context
             lines = [
-                f"[Continuing session: {session.project_name}]",
-                f"[Previous conversation ({len(recent)} messages):]",
+                f"[Context from session: {session.project_name}]",
+                "[Recent conversation:]",
                 "",
             ]
-
             for msg in recent:
-                role = msg["role"].capitalize()
-                # Truncate very long messages
                 content = msg["content"]
-                if len(content) > 500:
-                    content = content[:500] + "..."
-                lines.append(f"{role}: {content}")
+                if len(content) > 300:
+                    content = content[:300] + "..."
+                lines.append(f"{msg['role'].capitalize()}: {content}")
                 lines.append("")
 
-            lines.append("[Continue the conversation:]")
-
+            lines.append("[Now respond to the user's new request:]")
             return "\n".join(lines)
 
-        except Exception as e:
-            print(f"Error loading session context: {e}")
+        except Exception:
             return None
+
+    def _extract_text(self, content) -> str:
+        """Extract text from message content."""
+        if isinstance(content, str):
+            return content
+        elif isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+            return "\n".join(parts)
+        return ""
+
+    def _clean_output(self, output: str) -> str:
+        """Clean CLI output for voice response."""
+        # Remove ANSI escape codes
+        ansi_pattern = re.compile(r"\x1b\[[0-9;]*m")
+        output = ansi_pattern.sub("", output)
+
+        # Remove common CLI prefixes/suffixes
+        lines = output.strip().split("\n")
+
+        # Filter out progress indicators, spinners, etc.
+        filtered = []
+        for line in lines:
+            line = line.strip()
+            # Skip empty lines and common noise
+            if not line:
+                continue
+            if line.startswith("�") or line.startswith("✓") or line.startswith("→"):
+                continue
+            if "loading" in line.lower() or "initializing" in line.lower():
+                continue
+            filtered.append(line)
+
+        return "\n".join(filtered) if filtered else output.strip()
 
 
 class SyncBridge:
-    """Synchronous wrapper for AmplifierBridge.
+    """Synchronous wrapper for AmplifierBridge."""
 
-    Use this in synchronous contexts (like the HTTP server).
-    """
-
-    def __init__(self, bundle_path: Optional[str] = None):
-        self.bridge = AmplifierBridge(bundle_path)
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-
-    def _get_loop(self) -> asyncio.AbstractEventLoop:
-        """Get or create an event loop."""
-        if self._loop is None or self._loop.is_closed():
-            try:
-                self._loop = asyncio.get_event_loop()
-            except RuntimeError:
-                self._loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(self._loop)
-        return self._loop
+    def __init__(self, bundle: Optional[str] = None, timeout: int = 120):
+        self.bridge = AmplifierBridge(bundle, timeout)
 
     def execute(
         self,
@@ -300,17 +263,4 @@ class SyncBridge:
         working_directory: Optional[str] = None,
     ) -> BridgeResponse:
         """Execute a prompt synchronously."""
-        loop = self._get_loop()
-        return loop.run_until_complete(
-            self.bridge.execute(prompt, continue_session, working_directory)
-        )
-
-    def initialize(self) -> bool:
-        """Initialize the bridge synchronously."""
-        loop = self._get_loop()
-        return loop.run_until_complete(self.bridge.initialize())
-
-
-def is_amplifier_available() -> bool:
-    """Check if Amplifier is available."""
-    return AMPLIFIER_AVAILABLE
+        return self.bridge.execute(prompt, continue_session, working_directory)
