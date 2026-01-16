@@ -1,0 +1,442 @@
+name: "issue-resolution"
+description: "Systematic issue handling workflow: reconnaissance -> root cause -> approval -> implementation -> shadow testing -> validation"
+version: "1.0.0"
+author: "Deliberate Development"
+tags: ["debugging", "issue", "bugfix", "workflow", "deliberate-development"]
+
+# This recipe implements the 6-phase issue handling workflow:
+#
+# Phase 1: Reconnaissance - Understand what's broken
+# Phase 2: Root Cause Analysis - Find the EXACT cause
+# Phase 3: GATE 1 - Investigation approval (human checkpoint)
+# Phase 4: Implementation - Make the fix, commit locally
+# Phase 5: Shadow Testing - Prove the fix works
+# Phase 6: GATE 2 - Final validation and push approval
+#
+# Key principles:
+# - Investigation before action
+# - Evidence-based testing
+# - User time is sacred - present complete solutions
+# - Two approval gates for human oversight
+#
+# Typical runtime: 20-60 minutes depending on issue complexity
+# Best for: Bug fixes, error resolution, behavioral issues
+#
+# Usage:
+#   "run the issue-resolution recipe for: [issue description]"
+#   "execute issue-resolution with issue='No providers mounted error'"
+
+context:
+  issue: ""                 # Required: description of the issue/error
+  repo: ""                  # Optional: primary repo where issue exists
+  error_message: ""         # Optional: specific error message if available
+  reproduction_steps: ""    # Optional: how to reproduce the issue
+  working_scenario: ""      # Optional: similar scenario that DOES work (for comparison)
+
+stages:
+  investigation:
+    description: "Phases 1-2: Reconnaissance and root cause analysis"
+    steps:
+      # Phase 1: Reconnaissance
+      - id: "reconnaissance"
+        agent: "foundation:explorer"
+        provider: "anthropic"
+        model: "claude-sonnet-*"
+        prompt: |
+          RECONNAISSANCE
+          ==============
+          
+          Issue: {{issue}}
+          
+          {{#if repo}}
+          Primary repo: {{repo}}
+          {{/if}}
+          
+          {{#if error_message}}
+          Error message: {{error_message}}
+          {{/if}}
+          
+          {{#if reproduction_steps}}
+          Reproduction steps: {{reproduction_steps}}
+          {{/if}}
+          
+          Gather context for this issue:
+          
+          1. **Identify affected components** - What code paths are involved?
+          
+          2. **Check recent changes** - Any commits that might relate?
+          
+          3. **Find similar code** - Are there working examples to compare?
+          
+          4. **Map dependencies** - What does this code interact with?
+          
+          Provide a structured context report, not exhaustive exploration.
+          Focus on information that will help identify root cause.
+        output: "recon_findings"
+        timeout: 300
+
+      # Phase 2: Root Cause Analysis
+      - id: "root-cause-analysis"
+        agent: "deliberate-development:deliberate-debugger"
+        provider: "anthropic"
+        model: "claude-sonnet-*"
+        prompt: |
+          ROOT CAUSE ANALYSIS
+          ===================
+          
+          Issue: {{issue}}
+          
+          {{#if working_scenario}}
+          Working scenario for comparison: {{working_scenario}}
+          {{/if}}
+          
+          Reconnaissance findings:
+          {{recon_findings}}
+          
+          Find the EXACT root cause:
+          
+          1. **Form hypotheses** - What could cause this?
+          
+          2. **Test each hypothesis** - Trace code paths, check evidence
+          
+          3. **Compare working vs broken** - Where do they diverge?
+          
+          4. **Identify the exact location** - File and line number
+          
+          Provide:
+          - Hypothesis tested and results
+          - Root cause with file:line reference
+          - Evidence supporting this conclusion
+          - Proposed fix approach
+          
+          Do NOT guess. If uncertain, identify what additional investigation is needed.
+        output: "root_cause"
+        timeout: 600
+
+      # Prepare Gate 1 summary
+      - id: "gate1-summary"
+        agent: "foundation:explorer"
+        provider: "anthropic"
+        model: "claude-haiku"
+        prompt: |
+          GATE 1: INVESTIGATION SUMMARY
+          =============================
+          
+          Issue: {{issue}}
+          
+          Root cause analysis:
+          {{root_cause}}
+          
+          Prepare a clear summary for approval:
+          
+          ## Problem
+          [Clear statement of what's broken]
+          
+          ## Root Cause
+          [Exact file:line with explanation]
+          
+          ## Evidence
+          [How we know this is the cause]
+          
+          ## Proposed Fix
+          [What changes will be made]
+          
+          ## Files to Change
+          [List of files and what changes]
+          
+          ## Testing Plan
+          [How the fix will be verified]
+          
+          ## Questions for Approval
+          [Any decisions needed from user]
+        output: "gate1_summary"
+        timeout: 120
+
+  implementation:
+    description: "Phase 4: Implement the fix"
+    requires_approval: true
+    approval_context: |
+      ## GATE 1: Investigation Complete
+      
+      {{gate1_summary}}
+      
+      **Approve to proceed with implementation, or provide feedback.**
+    steps:
+      - id: "implement-fix"
+        agent: "deliberate-development:deliberate-implementer"
+        provider: "anthropic"
+        model: "claude-sonnet-*"
+        prompt: |
+          IMPLEMENT FIX
+          =============
+          
+          Issue: {{issue}}
+          
+          Approved fix from investigation:
+          {{root_cause}}
+          
+          Implementation instructions:
+          1. Make the fix as described in the root cause analysis
+          2. Run python_check to verify syntax
+          3. Commit locally with descriptive message
+          4. Document any out-of-scope work discovered
+          
+          Commit message format:
+          ```
+          fix: short description
+          
+          Root cause: [brief explanation]
+          Fix: [what changed]
+          
+          Fixes: [issue reference if available]
+          ```
+          
+          Provide:
+          - Files changed and what was modified
+          - python_check results
+          - Local commit hash and message
+          - Any out-of-scope work discovered
+        output: "implementation_result"
+        timeout: 600
+
+  testing:
+    description: "Phase 5: Shadow testing with evidence"
+    steps:
+      - id: "define-evidence"
+        agent: "deliberate-development:deliberate-debugger"
+        provider: "anthropic"
+        model: "claude-haiku"
+        prompt: |
+          DEFINE EVIDENCE REQUIREMENTS
+          ============================
+          
+          Issue: {{issue}}
+          
+          {{#if error_message}}
+          Original error: {{error_message}}
+          {{/if}}
+          
+          Implementation:
+          {{implementation_result}}
+          
+          Define specific, measurable evidence requirements:
+          
+          1. **Error disappears:**
+             - What error should NOT appear?
+             - How to verify (grep, exit code)?
+          
+          2. **Functional behavior:**
+             - What command demonstrates the fix?
+             - What should the output contain?
+          
+          3. **End-to-end correctness:**
+             - What user workflow should work?
+             - What proves it works from user perspective?
+          
+          Format each requirement with:
+          - Requirement name
+          - Command to execute
+          - Expected result
+          - How to verify (specific check)
+        output: "evidence_requirements"
+        timeout: 120
+
+      - id: "shadow-test"
+        agent: "shadow-operator"
+        provider: "anthropic"
+        model: "claude-sonnet-*"
+        prompt: |
+          SHADOW TESTING
+          ==============
+          
+          Issue: {{issue}}
+          
+          Implementation:
+          {{implementation_result}}
+          
+          Evidence requirements:
+          {{evidence_requirements}}
+          
+          Execute shadow testing:
+          
+          1. Create shadow environment with local changes
+          2. Install Amplifier from local source
+          3. Run each evidence requirement test
+          4. Collect results with specific output
+          
+          For each requirement:
+          - Execute the test
+          - Capture output
+          - Mark PASS or FAIL
+          - If FAIL, note what went wrong
+          
+          Provide complete evidence table:
+          | Requirement | Command | Expected | Actual | Status |
+          |-------------|---------|----------|--------|--------|
+          
+          Overall verdict: ALL PASS or NEEDS INVESTIGATION
+        output: "shadow_results"
+        timeout: 900
+
+      # Prepare Gate 2 summary
+      - id: "gate2-summary"
+        agent: "foundation:explorer"
+        provider: "anthropic"
+        model: "claude-haiku"
+        prompt: |
+          GATE 2: VALIDATION SUMMARY
+          ==========================
+          
+          Issue: {{issue}}
+          
+          Implementation:
+          {{implementation_result}}
+          
+          Shadow test results:
+          {{shadow_results}}
+          
+          Prepare final summary for push approval:
+          
+          ## Issue RESOLVED
+          
+          ### Root Cause
+          [Brief explanation]
+          
+          ### The Fix
+          [What was changed]
+          
+          ### Shadow Testing Results
+          [Evidence table from testing]
+          
+          ### Files Changed
+          [List with descriptions]
+          
+          ### Ready for Push
+          [Commit hash and message]
+          
+          ### User Resolution Steps
+          [How users can get the fix after push]
+        output: "gate2_summary"
+        timeout: 120
+
+  finalization:
+    description: "Phase 6: Final validation and push"
+    requires_approval: true
+    approval_context: |
+      ## GATE 2: Complete Solution Ready for Push
+      
+      {{gate2_summary}}
+      
+      **Approve to push, or provide feedback.**
+    steps:
+      - id: "push-changes"
+        agent: "foundation:git-ops"
+        provider: "anthropic"
+        model: "claude-sonnet-*"
+        prompt: |
+          PUSH FIX
+          ========
+          
+          Implementation:
+          {{implementation_result}}
+          
+          Push the committed fix:
+          1. Rebase onto latest main if needed
+          2. Push to origin
+          3. Report the pushed commit
+          
+          Provide:
+          - Final commit hash on remote
+          - Any rebase notes
+        output: "push_result"
+        timeout: 300
+
+      - id: "smoke-test"
+        agent: "shadow-smoke-test"
+        provider: "anthropic"
+        model: "claude-sonnet-*"
+        prompt: |
+          INDEPENDENT SMOKE TEST
+          ======================
+          
+          Issue: {{issue}}
+          
+          Evidence requirements:
+          {{evidence_requirements}}
+          
+          Push result:
+          {{push_result}}
+          
+          Run independent validation:
+          1. Create fresh shadow environment (no local sources)
+          2. Install from pushed code
+          3. Run the same evidence requirements
+          4. Provide objective PASS/FAIL verdict
+          
+          This validates what users will actually get.
+        output: "smoke_result"
+        timeout: 600
+
+      - id: "final-summary"
+        agent: "foundation:explorer"
+        provider: "anthropic"
+        model: "claude-haiku"
+        prompt: |
+          ISSUE RESOLUTION COMPLETE
+          =========================
+          
+          Issue: {{issue}}
+          
+          Push result: {{push_result}}
+          Smoke test: {{smoke_result}}
+          
+          Create final summary:
+          
+          ## Resolution Summary
+          
+          ### What Was Fixed
+          [Brief description]
+          
+          ### Commit
+          [Hash and message]
+          
+          ### Verification
+          [Smoke test results]
+          
+          ### User Instructions
+          To get this fix:
+          ```
+          amplifier reset --remove cache -y
+          amplifier provider install <provider-name>
+          ```
+          
+          ### Learnings
+          [Any process improvements from this issue]
+        output: "final_summary"
+        timeout: 120
+
+# Example execution flow:
+#
+# INVESTIGATION STAGE (no approval needed to start):
+#   reconnaissance: Survey affected code (5 min)
+#   root-cause-analysis: Find exact cause (10 min)
+#   gate1-summary: Prepare for approval (2 min)
+#
+# GATE 1: User reviews investigation and approves approach
+#
+# IMPLEMENTATION STAGE:
+#   implement-fix: Make changes, commit locally (10 min)
+#
+# TESTING STAGE:
+#   define-evidence: Create test requirements (2 min)
+#   shadow-test: Run tests in sandbox (15 min)
+#   gate2-summary: Prepare for approval (2 min)
+#
+# GATE 2: User reviews complete solution and approves push
+#
+# FINALIZATION STAGE:
+#   push-changes: Push to remote (2 min)
+#   smoke-test: Independent validation (10 min)
+#   final-summary: Document resolution (2 min)
+#
+# Total: ~45-60 minutes with two human checkpoints

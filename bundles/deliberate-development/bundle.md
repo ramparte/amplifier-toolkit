@@ -15,6 +15,7 @@ agents:
     - deliberate-development:deliberate-planner
     - deliberate-development:deliberate-implementer
     - deliberate-development:deliberate-reviewer
+    - deliberate-development:deliberate-debugger
 ---
 
 # Deliberate Development
@@ -67,6 +68,22 @@ The implementer:
 - Reports complete only when verified
 - Does NOT plan (requires specification input)
 
+### deliberate-debugger
+
+Use for issue investigation and resolution:
+
+```
+"Use deliberate-debugger to investigate this error"
+"Have deliberate-debugger find the root cause of this bug"
+```
+
+The debugger:
+- Investigates before taking action
+- Finds exact root cause with file:line references
+- Uses evidence-based testing (specific proof requirements)
+- Follows the 6-phase workflow with two approval gates
+- Does NOT guess - investigates until certain
+
 ## Available Recipes
 
 ### deliberate-design
@@ -103,6 +120,23 @@ Steps:
 6. **implement** - Build with validation
 7. **validate** - Verify integration
 8. **summarize** - Document for handoff
+
+### issue-resolution
+
+Systematic bug fixing: reconnaissance -> root cause -> fix -> shadow test -> push
+
+```
+"Run the issue-resolution recipe for: No providers mounted error"
+"Execute issue-resolution with issue='tests failing after recent change'"
+```
+
+Stages (with approval gates):
+1. **Investigation** (reconnaissance, root cause analysis)
+2. **GATE 1** - User approves approach before implementation
+3. **Implementation** (make fix, commit locally)
+4. **Testing** (define evidence, shadow test)
+5. **GATE 2** - User approves before push
+6. **Finalization** (push, smoke test, document)
 
 ## The Deliberate Workflow
 
@@ -173,8 +207,25 @@ This bundle works alongside foundation agents:
 - **modular-builder** - For brick-style module implementation
 - **bug-hunter** - When validation reveals issues
 - **explorer** - For codebase reconnaissance
+- **shadow-operator** - For isolated testing environments
+- **shadow-smoke-test** - For independent validation
+- **git-ops** - For commits and pushes with safety protocols
 
 The deliberate agents provide the **workflow discipline**, while foundation agents provide **domain expertise**.
+
+### Issue Handling Workflow
+
+When bugs or errors arise, use the issue-resolution recipe or deliberate-debugger agent:
+
+```
+User reports error → deliberate-debugger investigates → GATE 1 approval
+→ implement fix → shadow test → GATE 2 approval → push → smoke test
+```
+
+Key principles from @deliberate-development:context/ISSUE_HANDLING.md:
+- **Investigation before action** - Never code until you understand completely
+- **Evidence-based testing** - Define proof requirements BEFORE testing
+- **User time is sacred** - Present complete solutions, not partial findings
 
 ## Philosophy Summary
 
