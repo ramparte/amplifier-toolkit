@@ -1,8 +1,8 @@
 ---
 bundle:
   name: my-amplifier
-  version: 1.0.0
-  description: Personal Amplifier with amplifier-dev + dev-memory
+  version: 1.1.0
+  description: Personal Amplifier with amplifier-dev + dev-memory + vibecoding practices
 
 config:
   allowed_write_dirs:
@@ -20,11 +20,14 @@ includes:
   
   # Deliberate development - decomposition-first workflow
   - bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/deliberate-development
+  
+  # Vibecoding - practitioner community patterns (fresh-eyes, plan-persistence, etc.)
+  - bundle: git+https://github.com/ramparte/vibecoding@main
 ---
 
 # My Personal Amplifier
 
-A thin bundle combining amplifier-dev with persistent dev-memory capabilities.
+A thin bundle combining amplifier-dev with persistent dev-memory capabilities and community practices.
 
 ## What's Included
 
@@ -32,6 +35,7 @@ A thin bundle combining amplifier-dev with persistent dev-memory capabilities.
 - All standard tools (filesystem, bash, web, search, task delegation)
 - Session configuration and hooks
 - Access to all foundation agents (zen-architect, modular-builder, explorer, etc.)
+- Shadow environments for safe testing
 - Automatic updates when foundation evolves
 
 **From Dev-Memory:**
@@ -50,6 +54,12 @@ A thin bundle combining amplifier-dev with persistent dev-memory capabilities.
 - Specification-based implementation (deliberate-implementer agent)
 - Recipes: deliberate-design, feature-development
 - "4-5 planning turns, then one go-do-it turn" philosophy
+
+**From Vibecoding:**
+- Community-sourced AI development patterns
+- Behaviors: fresh-eyes, plan-persistence, clear-early, understanding-md, subagent-coordinator, question-bubbling
+- Recipes: overnight-code-review, spec-iteration, token-burner, skill-testing, antagonistic-panel, wiggum-loop
+- Chat analysis agent for extracting patterns from conversations
 
 ## Usage
 
