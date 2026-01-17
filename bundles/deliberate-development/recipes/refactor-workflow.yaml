@@ -1,0 +1,163 @@
+name: "refactor-workflow"
+description: "Safe incremental refactoring: analyze-impact -> plan-changes -> implement-incremental -> validate"
+version: "1.0.0"
+author: "Deliberate Development"
+tags: ["refactor", "incremental", "safe", "deliberate-development"]
+
+# Refactoring workflow emphasizes:
+# - Understanding impact before changing
+# - Incremental changes with validation at each step
+# - Rollback-friendly approach
+# - No behavior changes (unless explicitly intended)
+#
+# Typical runtime: 20-40 minutes
+#
+# Usage:
+#   "run the refactor-workflow recipe for: [refactoring goal]"
+#   "execute refactor-workflow with target='rename UserService to AccountService'"
+
+context:
+  refactor_goal: ""        # Required: what refactoring to perform
+  target_files: ""         # Optional: specific files to refactor
+  preserve_behavior: true  # Optional: ensure no behavior changes (default true)
+
+steps:
+  # Step 1: Analyze impact
+  - id: "analyze-impact"
+    agent: "foundation:explorer"
+    prompt: |
+      IMPACT ANALYSIS
+      ===============
+      
+      Refactoring goal: {{refactor_goal}}
+      
+      {{#if target_files}}
+      Target files: {{target_files}}
+      {{/if}}
+      
+      Analyze the impact of this refactoring:
+      
+      1. **Scope** - What files/functions will be affected?
+      
+      2. **Dependencies** - What depends on the code being changed?
+      
+      3. **Test coverage** - Are there tests for affected code?
+      
+      4. **Risk areas** - What could break?
+      
+      5. **External interfaces** - Are any public APIs affected?
+      
+      Provide a complete impact map before any changes.
+    output: "impact_analysis"
+    timeout: 300
+
+  # Step 2: Plan incremental changes
+  - id: "plan-changes"
+    agent: "deliberate-development:deliberate-planner"
+    prompt: |
+      REFACTORING PLAN
+      ================
+      
+      Goal: {{refactor_goal}}
+      
+      {{#if preserve_behavior}}
+      CONSTRAINT: Preserve existing behavior - this is pure refactoring.
+      {{/if}}
+      
+      Impact analysis:
+      {{impact_analysis}}
+      
+      Create an incremental refactoring plan:
+      
+      ## Change Order
+      
+      List changes in order, where each step:
+      - Is independently testable
+      - Can be rolled back if needed
+      - Doesn't break the build
+      
+      For each step:
+      1. **What**: Specific change
+      2. **Files**: Affected files
+      3. **Verify**: How to confirm it works
+      4. **Rollback**: How to undo if needed
+      
+      ## Risk Mitigation
+      
+      - What to watch for
+      - When to stop and reassess
+    output: "refactor_plan"
+    timeout: 300
+
+  # Step 3: Implement incrementally
+  - id: "implement-incremental"
+    agent: "deliberate-development:deliberate-implementer"
+    prompt: |
+      INCREMENTAL IMPLEMENTATION
+      ==========================
+      
+      Goal: {{refactor_goal}}
+      
+      Plan:
+      {{refactor_plan}}
+      
+      Implement the refactoring following the plan:
+      
+      For EACH step in the plan:
+      1. Make the change
+      2. Run tests/verification
+      3. Commit with message: "refactor: [step description]"
+      4. If verification fails, rollback and report
+      
+      STOP if any step fails verification.
+      
+      Report:
+      - Steps completed successfully
+      - Verification results for each step
+      - Any issues encountered
+      - Final git log showing commits
+    output: "implementation_result"
+    timeout: 900
+
+  # Step 4: Final validation
+  - id: "validate"
+    agent: "foundation:zen-architect"
+    mode: "REVIEW"
+    prompt: |
+      REFACTORING VALIDATION
+      ======================
+      
+      Goal: {{refactor_goal}}
+      
+      {{#if preserve_behavior}}
+      Constraint: Behavior should be preserved.
+      {{/if}}
+      
+      Plan: {{refactor_plan}}
+      Implementation: {{implementation_result}}
+      
+      Validate the refactoring:
+      
+      1. **Completeness** - Were all planned changes made?
+      
+      2. **Behavior preservation** - Does it still work the same?
+      
+      3. **Code quality** - Is the code better than before?
+      
+      4. **No regressions** - All tests still pass?
+      
+      5. **Clean commits** - Each commit is atomic and reversible?
+      
+      Verdict: PASS / PARTIAL / FAIL
+      
+      If not PASS, list what needs attention.
+    output: "validation_result"
+    timeout: 300
+
+# Example:
+# "Rename UserService to AccountService"
+#
+# analyze-impact: Find all usages of UserService (3 min)
+# plan-changes: Order changes to avoid breaking imports (3 min)
+# implement-incremental: Rename in order, commit each step (15 min)
+# validate: Verify behavior preserved (3 min)

@@ -1,0 +1,187 @@
+name: "learning-exploration"
+description: "Codebase exploration workflow for understanding: survey -> deep-dive -> document -> summarize"
+version: "1.0.0"
+author: "Deliberate Development"
+tags: ["learning", "exploration", "onboarding", "understanding", "deliberate-development"]
+
+# Learning exploration is for understanding code without changing it:
+# - Onboarding to a new codebase
+# - Understanding unfamiliar modules
+# - Researching how something works
+# - Preparing for future work
+#
+# NO IMPLEMENTATION - output is documentation and understanding.
+#
+# Typical runtime: 15-30 minutes
+#
+# Usage:
+#   "run the learning-exploration recipe for: [what to understand]"
+#   "execute learning-exploration with topic='authentication system'"
+
+context:
+  topic: ""                # Required: what to explore/understand
+  codebase_path: ""        # Optional: specific path to focus on
+  questions: ""            # Optional: specific questions to answer
+  output_format: "markdown" # Optional: markdown, notes, or outline
+
+steps:
+  # Step 1: Broad survey
+  - id: "survey"
+    agent: "foundation:explorer"
+    prompt: |
+      CODEBASE SURVEY
+      ===============
+      
+      Topic to understand: {{topic}}
+      
+      {{#if codebase_path}}
+      Focus area: {{codebase_path}}
+      {{/if}}
+      
+      {{#if questions}}
+      Questions to answer: {{questions}}
+      {{/if}}
+      
+      Conduct a broad survey:
+      
+      1. **Entry points** - Where does this topic start in the code?
+      
+      2. **Key files** - What are the main files involved?
+      
+      3. **Dependencies** - What does this depend on? What depends on it?
+      
+      4. **Patterns** - What design patterns or conventions are used?
+      
+      5. **Terminology** - What domain-specific terms appear?
+      
+      Create a map of the territory before diving deep.
+    output: "survey_results"
+    timeout: 300
+
+  # Step 2: Deep dive into key areas
+  - id: "deep-dive"
+    agent: "foundation:explorer"
+    prompt: |
+      DEEP DIVE
+      =========
+      
+      Topic: {{topic}}
+      
+      Survey results:
+      {{survey_results}}
+      
+      {{#if questions}}
+      Questions to answer: {{questions}}
+      {{/if}}
+      
+      Now dive deeper into the key areas identified:
+      
+      1. **Read the main files** - Understand the core logic
+      
+      2. **Trace key flows** - Follow data/control through the system
+      
+      3. **Understand interfaces** - What are the contracts?
+      
+      4. **Note edge cases** - What special handling exists?
+      
+      5. **Find the tests** - What do tests reveal about expected behavior?
+      
+      Focus on UNDERSTANDING, not judging or improving.
+    output: "deep_dive_findings"
+    timeout: 600
+
+  # Step 3: Document findings
+  - id: "document"
+    agent: "deliberate-development:deliberate-planner"
+    prompt: |
+      DOCUMENT FINDINGS
+      =================
+      
+      Topic: {{topic}}
+      Output format: {{output_format}}
+      
+      Survey: {{survey_results}}
+      Deep dive: {{deep_dive_findings}}
+      
+      {{#if questions}}
+      Original questions: {{questions}}
+      {{/if}}
+      
+      Create documentation of what you learned:
+      
+      ## {{topic}} - Learning Notes
+      
+      ### Overview
+      [High-level summary of what this is and does]
+      
+      ### Architecture
+      [How the pieces fit together]
+      
+      ### Key Components
+      [Important files/classes with their roles]
+      
+      ### Data Flow
+      [How data moves through the system]
+      
+      ### Key Concepts
+      [Important patterns, conventions, or domain concepts]
+      
+      {{#if questions}}
+      ### Answers to Questions
+      [Address each original question]
+      {{/if}}
+      
+      ### Gotchas
+      [Non-obvious things someone should know]
+      
+      ### Further Reading
+      [Files/docs worth reading for deeper understanding]
+      
+      This documentation should help someone else understand this topic.
+    output: "documentation"
+    timeout: 600
+
+  # Step 4: Executive summary
+  - id: "summarize"
+    agent: "foundation:explorer"
+    prompt: |
+      EXECUTIVE SUMMARY
+      =================
+      
+      Topic: {{topic}}
+      
+      Full documentation:
+      {{documentation}}
+      
+      Create a brief executive summary (1-2 paragraphs):
+      
+      ## TL;DR: {{topic}}
+      
+      [What this is, how it works, and the key things to know]
+      
+      ## Quick Reference
+      
+      - **Entry point**: [main file/function]
+      - **Key files**: [3-5 most important files]
+      - **Pattern**: [main design pattern used]
+      - **Dependencies**: [key external dependencies]
+      
+      ## If You Need To...
+      
+      - **Modify X**: Start at [file]
+      - **Debug Y**: Look at [file]
+      - **Add Z**: Follow pattern in [file]
+      
+      Keep it actionable and concise.
+    output: "summary"
+    timeout: 180
+
+# Example:
+# "Understand the authentication system"
+#
+# survey: Find auth-related files, map the territory (5 min)
+# deep-dive: Read key files, trace login flow (10 min)
+# document: Create comprehensive learning notes (10 min)
+# summarize: Distill into quick reference (3 min)
+#
+# Output: Documentation + quick reference for future use

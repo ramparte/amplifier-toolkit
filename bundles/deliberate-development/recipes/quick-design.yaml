@@ -1,0 +1,106 @@
+name: "quick-design"
+description: "Lightweight 3-step design workflow for small features: decompose -> recommend -> specify"
+version: "1.0.0"
+author: "Deliberate Development"
+tags: ["design", "quick", "lightweight", "deliberate-development"]
+
+# Quick design is for small, well-understood features where:
+# - The problem space is already known
+# - Generalization isn't needed
+# - A single recommendation suffices
+#
+# Use deliberate-design for larger or more complex features.
+#
+# Typical runtime: 5-10 minutes
+#
+# Usage:
+#   "run the quick-design recipe for: [feature description]"
+
+context:
+  feature_description: ""  # Required: what needs to be designed
+  codebase_context: ""     # Optional: relevant paths or context
+
+steps:
+  # Step 1: Quick decomposition
+  - id: "decompose"
+    agent: "deliberate-development:deliberate-planner"
+    prompt: |
+      QUICK DECOMPOSITION
+      ===================
+      
+      Feature: {{feature_description}}
+      
+      {{#if codebase_context}}
+      Context: {{codebase_context}}
+      {{/if}}
+      
+      Quickly decompose this feature (this is lightweight analysis):
+      
+      1. **Core need** - What problem are we solving?
+      2. **Components** - What are the main pieces (keep it simple)?
+      3. **Success criteria** - How do we know it's done?
+      
+      Keep it brief - this is quick design, not deep analysis.
+    output: "decomposition"
+    timeout: 180
+
+  # Step 2: Single recommendation (no exploration of alternatives)
+  - id: "recommend"
+    agent: "deliberate-development:deliberate-planner"
+    prompt: |
+      RECOMMENDATION
+      ==============
+      
+      Feature: {{feature_description}}
+      
+      Decomposition:
+      {{decomposition}}
+      
+      Provide a single recommended approach:
+      
+      - **Approach**: How to implement this
+      - **Rationale**: Why this approach
+      - **Complexity**: Low / Medium (if High, suggest using deliberate-design instead)
+      - **Key risks**: What could go wrong
+      
+      Skip exploration of alternatives - this is quick design for straightforward features.
+      If this needs deeper analysis, say so and recommend deliberate-design recipe.
+    output: "recommendation"
+    timeout: 180
+
+  # Step 3: Minimal specification
+  - id: "specify"
+    agent: "foundation:zen-architect"
+    mode: "ARCHITECT"
+    prompt: |
+      QUICK SPECIFICATION
+      ===================
+      
+      Feature: {{feature_description}}
+      
+      Decomposition: {{decomposition}}
+      Recommendation: {{recommendation}}
+      
+      Create a minimal implementation specification:
+      
+      ## Feature: Quick Design Output
+      
+      ### What to Build
+      [Brief description]
+      
+      ### Components
+      [List with file paths]
+      
+      ### Implementation Notes
+      [Key points for implementer]
+      
+      ### Done When
+      [Checklist of completion criteria]
+      
+      Keep it concise - just enough to implement.
+    output: "specification"
+    timeout: 300
+
+# After completion:
+# - Hand specification to deliberate-implementer
+# - Or implement directly if simple enough

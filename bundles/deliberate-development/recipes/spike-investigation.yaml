@@ -1,0 +1,201 @@
+name: "spike-investigation"
+description: "Time-boxed technical investigation: setup -> investigate -> document-findings -> recommend"
+version: "1.0.0"
+author: "Deliberate Development"
+tags: ["spike", "investigation", "research", "decision", "deliberate-development"]
+
+# Spike investigation is for time-boxed technical research:
+# - Evaluating a library or framework
+# - Investigating a technical approach
+# - Researching feasibility of a feature
+# - Go/no-go decision support
+#
+# Key principle: TIME-BOXED. Set a limit and stop when reached.
+#
+# Typical runtime: 15-30 minutes (or custom timebox)
+#
+# Usage:
+#   "run the spike-investigation recipe for: [investigation topic]"
+#   "execute spike-investigation with question='Can we use Redis for caching?'"
+
+context:
+  question: ""             # Required: the question to investigate
+  timebox_minutes: 30      # Optional: time limit for investigation
+  success_criteria: ""     # Optional: what would make this a "yes"
+  constraints: ""          # Optional: known constraints or requirements
+
+steps:
+  # Step 1: Setup investigation scope
+  - id: "setup"
+    agent: "deliberate-development:deliberate-planner"
+    prompt: |
+      SPIKE SETUP
+      ===========
+      
+      Question: {{question}}
+      Time budget: {{timebox_minutes}} minutes
+      
+      {{#if success_criteria}}
+      Success criteria: {{success_criteria}}
+      {{/if}}
+      
+      {{#if constraints}}
+      Constraints: {{constraints}}
+      {{/if}}
+      
+      Define the investigation scope:
+      
+      ## Investigation Plan
+      
+      ### Key Questions
+      1. [Primary question to answer]
+      2. [Secondary questions]
+      3. [Nice-to-know if time permits]
+      
+      ### What to Investigate
+      - [Specific things to look at]
+      - [Experiments to try if applicable]
+      
+      ### Success Criteria
+      {{#if success_criteria}}
+      Given: {{success_criteria}}
+      {{else}}
+      - What would make this a "go"?
+      - What would make this a "no-go"?
+      - What would require more investigation?
+      {{/if}}
+      
+      ### Out of Scope
+      [What we're explicitly NOT investigating in this timebox]
+      
+      Keep scope tight - this is time-boxed research.
+    output: "investigation_plan"
+    timeout: 180
+
+  # Step 2: Conduct investigation
+  - id: "investigate"
+    agent: "foundation:explorer"
+    prompt: |
+      INVESTIGATION
+      =============
+      
+      Question: {{question}}
+      
+      Plan:
+      {{investigation_plan}}
+      
+      Conduct the investigation:
+      
+      1. **Research** - Look up relevant information, docs, examples
+      
+      2. **Explore** - If code-related, examine relevant code
+      
+      3. **Test** - If applicable, try small experiments
+      
+      4. **Note blockers** - What obstacles did you encounter?
+      
+      Stay focused on the key questions. Don't rabbit-hole.
+      
+      Record:
+      - What you found
+      - What you tried
+      - What worked / didn't work
+      - Evidence gathered
+    output: "investigation_findings"
+    timeout: 600
+
+  # Step 3: Document findings
+  - id: "document-findings"
+    agent: "deliberate-development:deliberate-planner"
+    prompt: |
+      DOCUMENT FINDINGS
+      =================
+      
+      Question: {{question}}
+      
+      Plan: {{investigation_plan}}
+      Findings: {{investigation_findings}}
+      
+      Document what was learned:
+      
+      ## Spike: {{question}}
+      
+      ### Summary
+      [1-2 sentence answer to the main question]
+      
+      ### Findings
+      
+      #### What We Learned
+      - [Key finding 1]
+      - [Key finding 2]
+      - [Key finding 3]
+      
+      #### Evidence
+      [Links, code samples, or references that support findings]
+      
+      #### Unknowns Remaining
+      [Things we still don't know]
+      
+      ### Effort Estimate
+      [If we proceed, rough estimate of effort]
+      
+      ### Risks
+      [Technical risks identified]
+    output: "findings_document"
+    timeout: 300
+
+  # Step 4: Recommendation
+  - id: "recommend"
+    agent: "deliberate-development:deliberate-planner"
+    prompt: |
+      RECOMMENDATION
+      ==============
+      
+      Question: {{question}}
+      
+      {{#if success_criteria}}
+      Success criteria: {{success_criteria}}
+      {{/if}}
+      
+      Findings:
+      {{findings_document}}
+      
+      Provide a clear recommendation:
+      
+      ## Recommendation
+      
+      **Verdict**: [GO / NO-GO / NEEDS MORE INVESTIGATION]
+      
+      ### Rationale
+      [Why this recommendation based on findings]
+      
+      ### If GO
+      - Next steps
+      - Key considerations for implementation
+      - Recommended approach
+      
+      ### If NO-GO
+      - Why not
+      - Alternative approaches to consider
+      - What would change this to a GO
+      
+      ### If NEEDS MORE INVESTIGATION
+      - What specific questions remain
+      - Estimated time needed
+      - What would unblock the decision
+      
+      ---
+      
+      Be decisive. The point of a spike is to get an answer.
+    output: "recommendation"
+    timeout: 180
+
+# Example:
+# "Can we use SQLite instead of PostgreSQL for local development?"
+#
+# setup: Define what success looks like (2 min)
+# investigate: Research SQLite limitations, test with our schema (15 min)
+# document-findings: Record what was learned (5 min)
+# recommend: GO/NO-GO decision with rationale (3 min)
+#
+# Output: Clear recommendation with supporting evidence

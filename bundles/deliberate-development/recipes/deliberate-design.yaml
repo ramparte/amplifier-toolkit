@@ -30,8 +30,6 @@ steps:
   # Step 1: Decompose the problem
   - id: "decompose"
     agent: "deliberate-development:deliberate-planner"
-    provider: "anthropic"
-    model: "claude-sonnet-*"
     prompt: |
       DECOMPOSE THIS PROBLEM
       ======================
@@ -63,8 +61,6 @@ steps:
   # Step 2: Explore alternatives
   - id: "explore"
     agent: "deliberate-development:deliberate-planner"
-    provider: "anthropic"
-    model: "claude-sonnet-*"
     prompt: |
       EXPLORE SOLUTION SPACE
       ======================
@@ -93,8 +89,6 @@ steps:
   # Step 3: Look for generalization
   - id: "generalize"
     agent: "deliberate-development:deliberate-planner"
-    provider: "anthropic"
-    model: "claude-opus-*"  # Use opus for deeper thinking
     prompt: |
       GENERALIZATION ANALYSIS
       =======================
@@ -132,8 +126,6 @@ steps:
   - id: "specify"
     agent: "foundation:zen-architect"
     mode: "ARCHITECT"
-    provider: "anthropic"
-    model: "claude-sonnet-*"
     prompt: |
       CREATE IMPLEMENTATION SPECIFICATION
       ===================================
@@ -181,8 +173,6 @@ steps:
   # Step 5: Implement and validate
   - id: "implement"
     agent: "deliberate-development:deliberate-implementer"
-    provider: "anthropic"
-    model: "claude-sonnet-*"
     prompt: |
       IMPLEMENT FROM SPECIFICATION
       ============================

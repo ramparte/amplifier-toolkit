@@ -1,0 +1,186 @@
+name: "code-review-prep"
+description: "Self-review workflow before PR submission: self-review -> checklist -> improve -> generate-pr-description"
+version: "1.0.0"
+author: "Deliberate Development"
+tags: ["review", "pr", "self-review", "quality", "deliberate-development"]
+
+# Code review prep helps you:
+# - Review your own code before others see it
+# - Apply deliberate review principles to catch issues early
+# - Generate a good PR description
+# - Improve code quality before submission
+#
+# Run this AFTER implementation, BEFORE creating PR.
+#
+# Typical runtime: 10-15 minutes
+#
+# Usage:
+#   "run the code-review-prep recipe for my changes"
+#   "execute code-review-prep with branch='feature/my-feature'"
+
+context:
+  branch: ""               # Optional: branch name (default: current branch)
+  base_branch: "main"      # Optional: base branch to compare against
+  change_description: ""   # Optional: description of what was changed
+
+steps:
+  # Step 1: Self-review with deliberate principles
+  - id: "self-review"
+    agent: "deliberate-development:deliberate-reviewer"
+    prompt: |
+      SELF-REVIEW
+      ===========
+      
+      {{#if branch}}
+      Branch: {{branch}}
+      {{/if}}
+      Base: {{base_branch}}
+      
+      {{#if change_description}}
+      Changes: {{change_description}}
+      {{/if}}
+      
+      Review your own changes as if you were reviewing someone else's code:
+      
+      1. **Get the diff**: Run `git diff {{base_branch}}...HEAD`
+      
+      2. **Apply review principles**:
+         - Structural prevention vs runtime detection
+         - No arbitrary thresholds
+         - Clear boundaries
+         - Specification gates
+      
+      3. **Check for**:
+         - TODO comments or placeholders
+         - Debugging code left in
+         - Commented-out code
+         - Missing error handling
+         - Unclear variable names
+      
+      Be honest and critical - better to find issues now than in review.
+      
+      List all issues found, categorized by severity:
+      - MUST FIX: Blocking issues
+      - SHOULD FIX: Important improvements
+      - CONSIDER: Nice to have
+    output: "self_review_findings"
+    timeout: 300
+
+  # Step 2: Quality checklist
+  - id: "checklist"
+    agent: "foundation:explorer"
+    prompt: |
+      QUALITY CHECKLIST
+      =================
+      
+      Self-review findings:
+      {{self_review_findings}}
+      
+      Run through this checklist:
+      
+      ## Code Quality
+      - [ ] No TODOs or FIXMEs in production code
+      - [ ] No commented-out code
+      - [ ] No debugging prints/logs
+      - [ ] Error handling is complete
+      - [ ] Types are annotated (for Python)
+      
+      ## Testing
+      - [ ] New code has tests
+      - [ ] Existing tests still pass
+      - [ ] Edge cases are covered
+      
+      ## Documentation
+      - [ ] Public functions have docstrings
+      - [ ] Complex logic is commented
+      - [ ] README updated if needed
+      
+      ## Git
+      - [ ] Commits are atomic and well-messaged
+      - [ ] No merge commits (rebased on main)
+      - [ ] Branch name follows convention
+      
+      Mark each item PASS/FAIL and note issues.
+    output: "checklist_results"
+    timeout: 180
+
+  # Step 3: Make improvements
+  - id: "improve"
+    agent: "deliberate-development:deliberate-implementer"
+    prompt: |
+      MAKE IMPROVEMENTS
+      =================
+      
+      Self-review findings:
+      {{self_review_findings}}
+      
+      Checklist results:
+      {{checklist_results}}
+      
+      Fix the MUST FIX and SHOULD FIX issues:
+      
+      1. Address each issue identified
+      2. Commit fixes with message: "chore: pre-review improvements"
+      3. Skip CONSIDER items unless quick to fix
+      
+      If no issues to fix, report that code is ready.
+      
+      Report:
+      - Issues fixed
+      - Issues deferred (with reason)
+      - Final state of code
+    output: "improvements_made"
+    timeout: 600
+
+  # Step 4: Generate PR description
+  - id: "generate-pr-description"
+    agent: "foundation:explorer"
+    prompt: |
+      GENERATE PR DESCRIPTION
+      =======================
+      
+      {{#if change_description}}
+      Changes: {{change_description}}
+      {{/if}}
+      
+      {{#if branch}}
+      Branch: {{branch}}
+      {{/if}}
+      
+      Improvements made:
+      {{improvements_made}}
+      
+      Generate a PR description:
+      
+      ## Title
+      [Conventional commit style: type: description]
+      
+      ## Description
+      
+      ### What
+      [What this PR does]
+      
+      ### Why
+      [Why this change is needed]
+      
+      ### How
+      [Brief technical approach]
+      
+      ### Testing
+      [How this was tested]
+      
+      ### Checklist
+      - [ ] Tests pass
+      - [ ] Documentation updated
+      - [ ] Self-reviewed
+      
+      ---
+      
+      Output the PR description ready to copy-paste.
+    output: "pr_description"
+    timeout: 180
+
+# After completion:
+# - Copy the PR description
+# - Create the PR
+# - Feel confident it's ready for review

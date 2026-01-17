@@ -24,8 +24,6 @@ steps:
   # Step 1: Gather context about what's being reviewed
   - id: "gather-context"
     agent: "foundation:explorer"
-    provider: "anthropic"
-    model: "claude-haiku"
     prompt: |
       GATHER REVIEW CONTEXT
       =====================
@@ -55,8 +53,6 @@ steps:
   # Step 2: Structural prevention analysis
   - id: "structural-analysis"
     agent: "deliberate-development:deliberate-reviewer"
-    provider: "anthropic"
-    model: "claude-sonnet-*"
     prompt: |
       STRUCTURAL PREVENTION ANALYSIS
       ==============================
@@ -87,8 +83,6 @@ steps:
   # Step 3: Anti-pattern detection
   - id: "antipattern-check"
     agent: "deliberate-development:deliberate-reviewer"
-    provider: "anthropic"
-    model: "claude-sonnet-*"
     prompt: |
       ANTI-PATTERN DETECTION
       ======================
@@ -124,8 +118,6 @@ steps:
   # Step 4: Generate recommendations
   - id: "recommendations"
     agent: "deliberate-development:deliberate-reviewer"
-    provider: "anthropic"
-    model: "claude-sonnet-*"
     prompt: |
       GENERATE REVIEW RECOMMENDATIONS
       ===============================

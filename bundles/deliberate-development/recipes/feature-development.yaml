@@ -1,12 +1,12 @@
 name: "feature-development"
 description: "Full feature development lifecycle: workspace setup -> deliberate design -> implementation -> validation -> cleanup"
-version: "1.0.0"
+version: "1.1.0"
 author: "Deliberate Development"
 tags: ["feature", "workflow", "full-lifecycle", "deliberate-development"]
 
 # This recipe implements the full deliberate development lifecycle:
 #
-# 1. Workspace Setup - Create focused workspace for the task
+# 1. Workspace Creation - Create fresh directory with git, AGENTS.md, submodules
 # 2. Context Gathering - Understand relevant codebase areas
 # 3. Deliberate Design - Decompose, explore, generalize, specify
 # 4. Implementation - Build with validation implicit
@@ -14,7 +14,7 @@ tags: ["feature", "workflow", "full-lifecycle", "deliberate-development"]
 # 6. Cleanup - Document and prepare for workspace destruction
 #
 # This mirrors the workflow pattern:
-# - Fresh workspace per task
+# - Fresh workspace per task (actually created, not just conceptual)
 # - Thorough planning before implementation
 # - Validation is implicit, not separate
 # - Workspace is throwaway, knowledge persists
@@ -29,20 +29,104 @@ tags: ["feature", "workflow", "full-lifecycle", "deliberate-development"]
 context:
   feature_name: ""         # Required: name for this feature (used for workspace)
   feature_description: ""  # Required: what the feature should do
-  repo: ""                 # Optional: primary repo to work in
-  related_repos: ""        # Optional: other repos that may be relevant
+  repo: ""                 # Optional: primary repo to work in (GitHub URL)
+  related_repos: ""        # Optional: comma-separated list of related repo URLs
   constraints: ""          # Optional: known constraints or requirements
+  workspace_base: "~/workspaces"  # Optional: base directory for workspaces
 
 steps:
-  # Step 1: Workspace context setup
-  - id: "setup-context"
-    agent: "foundation:explorer"
-    provider: "anthropic"
-    model: "claude-haiku"
+  # Step 1: Create workspace directory structure
+  - id: "create-workspace"
+    agent: "foundation:file-ops"
     prompt: |
-      WORKSPACE CONTEXT SETUP
-      =======================
+      CREATE WORKSPACE
+      ================
       
+      Create a fresh workspace for feature development.
+      
+      Feature name: {{feature_name}}
+      Base directory: {{workspace_base}}
+      
+      {{#if repo}}
+      Primary repo: {{repo}}
+      {{/if}}
+      
+      {{#if related_repos}}
+      Related repos: {{related_repos}}
+      {{/if}}
+      
+      Execute these steps:
+      
+      1. **Create workspace directory**
+         ```bash
+         mkdir -p {{workspace_base}}/{{feature_name}}
+         cd {{workspace_base}}/{{feature_name}}
+         ```
+      
+      2. **Initialize git repository**
+         ```bash
+         git init
+         git commit --allow-empty -m "Initialize workspace for {{feature_name}}"
+         ```
+      
+      3. **Create AGENTS.md working memory**
+         Create file AGENTS.md with this content:
+         ```markdown
+         # {{feature_name}} Workspace
+         
+         ## Current Focus
+         {{feature_description}}
+         
+         ## Key Decisions
+         [To be filled during planning]
+         
+         ## Open Questions
+         [To be filled during planning]
+         
+         ## Notes
+         Created: [timestamp]
+         ```
+      
+      4. **Add repos as submodules** (if provided)
+         {{#if repo}}
+         ```bash
+         git submodule add {{repo}} repos/primary
+         ```
+         {{/if}}
+         {{#if related_repos}}
+         For each repo in the comma-separated list, add as submodule:
+         ```bash
+         git submodule add [repo_url] repos/[repo_name]
+         ```
+         {{/if}}
+      
+      5. **Create .amplifier directory**
+         ```bash
+         mkdir -p .amplifier
+         ```
+      
+      6. **Commit workspace setup**
+         ```bash
+         git add -A
+         git commit -m "Setup workspace structure"
+         ```
+      
+      Report:
+      - Full path to created workspace
+      - Git status showing clean state
+      - List of submodules added (if any)
+      - Confirmation workspace is ready
+    output: "workspace_path"
+    timeout: 300
+
+  # Step 2: Gather codebase context
+  - id: "gather-context"
+    agent: "foundation:explorer"
+    prompt: |
+      GATHER WORKSPACE CONTEXT
+      ========================
+      
+      Workspace: {{workspace_path}}
       Feature: {{feature_name}}
       Description: {{feature_description}}
       
@@ -54,7 +138,7 @@ steps:
       Related repos: {{related_repos}}
       {{/if}}
       
-      Gather context for this feature development:
+      Survey the codebase to gather context for this feature:
       
       1. **Identify relevant files** - What existing code relates to this feature?
       
@@ -64,19 +148,20 @@ steps:
       
       4. **Check for conflicts** - Is anything else touching this area?
       
+      Update the workspace AGENTS.md with key findings.
+      
       Provide a concise context summary (not exhaustive exploration).
     output: "workspace_context"
     timeout: 300
 
-  # Step 2: Problem decomposition
+  # Step 3: Problem decomposition
   - id: "decompose"
     agent: "deliberate-development:deliberate-planner"
-    provider: "anthropic"
-    model: "claude-sonnet-*"
     prompt: |
       PROBLEM DECOMPOSITION
       =====================
       
+      Workspace: {{workspace_path}}
       Feature: {{feature_name}}
       Description: {{feature_description}}
       
@@ -98,19 +183,20 @@ steps:
       4. **Success criteria** - How do we know it's done?
       
       5. **Scope boundaries** - What's explicitly NOT included?
+      
+      Update AGENTS.md with decomposition notes.
     output: "decomposition"
     timeout: 300
 
-  # Step 3: Solution exploration
+  # Step 4: Solution exploration
   - id: "explore-solutions"
     agent: "deliberate-development:deliberate-planner"
-    provider: "anthropic"
-    model: "claude-sonnet-*"
     prompt: |
       SOLUTION EXPLORATION
       ====================
       
       Feature: {{feature_name}}
+      Workspace: {{workspace_path}}
       
       Decomposition:
       {{decomposition}}
@@ -128,20 +214,21 @@ steps:
       - Direct implementation vs. generalized solution
       - Building new vs. extending existing
       - Configuration-driven vs. hard-coded
+      
+      Update AGENTS.md with options considered.
     output: "solution_exploration"
     timeout: 300
 
-  # Step 4: Generalization check (the key insight step)
+  # Step 5: Generalization check (the key insight step)
   - id: "generalization-check"
     agent: "deliberate-development:deliberate-planner"
-    provider: "anthropic"
-    model: "claude-opus-*"
     prompt: |
       GENERALIZATION CHECK
       ====================
       
       Feature: {{feature_name}}
       Description: {{feature_description}}
+      Workspace: {{workspace_path}}
       
       Decomposition:
       {{decomposition}}
@@ -166,21 +253,22 @@ steps:
       Recommendation: Should we generalize? How much? Why or why not?
       
       Be honest about over-engineering risk vs. legitimate reuse value.
+      
+      Update AGENTS.md with generalization decision.
     output: "generalization_decision"
     timeout: 600
 
-  # Step 5: Create specification
+  # Step 6: Create specification
   - id: "create-spec"
     agent: "foundation:zen-architect"
     mode: "ARCHITECT"
-    provider: "anthropic"
-    model: "claude-sonnet-*"
     prompt: |
       CREATE FEATURE SPECIFICATION
       ============================
       
       Feature: {{feature_name}}
       Description: {{feature_description}}
+      Workspace: {{workspace_path}}
       
       Analysis results:
       - Decomposition: {{decomposition}}
@@ -208,19 +296,20 @@ steps:
       
       ### Definition of Done
       [Specific, verifiable criteria]
+      
+      Write the specification to {{workspace_path}}/SPEC.md
     output: "feature_spec"
     timeout: 600
 
-  # Step 6: Implementation
+  # Step 7: Implementation
   - id: "implement"
     agent: "deliberate-development:deliberate-implementer"
-    provider: "anthropic"
-    model: "claude-sonnet-*"
     prompt: |
       IMPLEMENT FEATURE
       =================
       
       Feature: {{feature_name}}
+      Workspace: {{workspace_path}}
       
       Specification:
       {{feature_spec}}
@@ -232,25 +321,26 @@ steps:
       - Complete each component before moving on
       - No TODOs or placeholders
       - Report issues rather than improvising
+      - Commit progress to workspace git as you go
       
       Provide:
       1. What was created (files, components)
       2. How it was validated
       3. Any issues encountered
+      4. Git log showing commits made
     output: "implementation_result"
     timeout: 900
 
-  # Step 7: Integration validation
+  # Step 8: Integration validation
   - id: "validate"
     agent: "foundation:zen-architect"
     mode: "REVIEW"
-    provider: "anthropic"
-    model: "claude-sonnet-*"
     prompt: |
       VALIDATE FEATURE
       ================
       
       Feature: {{feature_name}}
+      Workspace: {{workspace_path}}
       
       Specification:
       {{feature_spec}}
@@ -277,17 +367,16 @@ steps:
     output: "validation_result"
     timeout: 300
 
-  # Step 8: Summary for handoff
+  # Step 9: Summary for handoff
   - id: "summarize"
     agent: "foundation:explorer"
-    provider: "anthropic"
-    model: "claude-haiku"
     prompt: |
       FEATURE DEVELOPMENT SUMMARY
       ===========================
       
       Feature: {{feature_name}}
       Description: {{feature_description}}
+      Workspace: {{workspace_path}}
       
       Implementation: {{implementation_result}}
       Validation: {{validation_result}}
@@ -306,8 +395,12 @@ steps:
       ## What's Next
       [Follow-up tasks if any]
       
-      ## Workspace Cleanup Notes
-      [What to preserve vs discard]
+      ## Workspace Status
+      - Path: {{workspace_path}}
+      - Ready to push changes to real repos
+      - Safe to destroy after pushing
+      
+      Update AGENTS.md with final summary.
       
       Keep it concise - this is for documentation, not exploration.
     output: "feature_summary"
@@ -315,18 +408,19 @@ steps:
 
 # Example execution flow:
 #
-# setup-context: Quick survey of relevant code (5 min)
+# create-workspace: Create directory, git, AGENTS.md, submodules (2 min)
+# gather-context: Survey relevant code (5 min)
 # decompose: Break down the feature (5 min)
 # explore-solutions: 2-3 options analyzed (5 min)
-# generalization-check: Key insight moment (10 min with opus)
+# generalization-check: Key insight moment (10 min)
 # create-spec: Complete specification (10 min)
 # implement: Build with validation (15-30 min)
 # validate: Verify it works (5 min)
 # summarize: Document for handoff (2 min)
 #
-# Total: ~45 minutes for a medium feature
+# Total: ~45-60 minutes for a medium feature
 #
 # After completion:
-# - Push changes to real repos
-# - Destroy workspace
+# - Push changes from workspace submodules to real repos
+# - Destroy workspace: rm -rf {{workspace_path}}
 # - Session history preserved in ~/.amplifier/projects
