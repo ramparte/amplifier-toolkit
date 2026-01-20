@@ -1,8 +1,8 @@
 ---
 bundle:
   name: my-amplifier
-  version: 1.1.0
-  description: Personal Amplifier with amplifier-dev + dev-memory + vibecoding practices
+  version: 1.2.0
+  description: Personal Amplifier with amplifier-dev + dev-memory + vibecoding practices + user habits enforcement
 
 config:
   allowed_write_dirs:
@@ -27,7 +27,7 @@ includes:
 
 # My Personal Amplifier
 
-A thin bundle combining amplifier-dev with persistent dev-memory capabilities and community practices.
+A thin bundle combining amplifier-dev with persistent dev-memory capabilities, community practices, and personal habit enforcement.
 
 ## What's Included
 
@@ -61,6 +61,13 @@ A thin bundle combining amplifier-dev with persistent dev-memory capabilities an
 - Recipes: overnight-code-review, spec-iteration, token-burner, skill-testing, antagonistic-panel, wiggum-loop
 - Chat analysis agent for extracting patterns from conversations
 
+**User Habits Enforcement (NEW in 1.2.0):**
+- Proactive prompting for exit criteria and reference materials
+- Rejection of "blocked" as acceptable task closure
+- Evidence requirements before accepting completion claims
+- Dev-memory integration for tracking commitments
+- Active pushback when setting up for failure
+
 ## Usage
 
 ```bash
@@ -73,6 +80,10 @@ amplifier run --bundle git+https://github.com/ramparte/amplifier-toolkit@main#su
 # Or set as default in ~/.amplifier/settings.yaml:
 # bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/my-amplifier
 ```
+
+---
+
+@my-amplifier:context/user-habits.md
 
 ---
 
