@@ -49,3 +49,4 @@ includes:
 ## License
 
 MIT
+| [`m365-collab`](tools/m365-collab/) | Agent-to-agent collaboration via M365 SharePoint |
