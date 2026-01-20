@@ -13,15 +13,12 @@ bundle:
   version: 0.1.0
   description: Agent collaboration via M365 SharePoint - tasks, status, handoffs
 
-# Tool module
+# Tool module with explicit class path
 tools:
   - module: m365-collab
     source: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=tools/m365-collab
-    config:
-      # Credentials loaded from environment variables:
-      # - M365_TENANT_ID
-      # - M365_CLIENT_ID
-      # - M365_CLIENT_SECRET
+    class: m365_collab:Tool
+    config: {}
 
 # Context documentation
 context:
