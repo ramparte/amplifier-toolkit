@@ -1,24 +1,26 @@
 # Amplifier Toolkit
 
-Personal collection of Amplifier bundles, recipes, scripts, and extensions.
+A library of reusable Amplifier components: bundles, recipes, scripts, and tools.
 
-## Quick Start
-
-```bash
-# Add the toolkit bundle (includes my-amplifier)
-amplifier bundle add git+https://github.com/ramparte/amplifier-toolkit@main --name my-amplifier
-amplifier bundle use my-amplifier
-```
+> **Note:** This repo provides components to be *included* by other bundles. It is NOT itself a loadable bundle. For your main personal bundle, use [ramparte/my-amplifier](https://github.com/ramparte/my-amplifier).
 
 ## Contents
 
 ### Bundles (`bundles/`)
 
-| Bundle | Description |
-|--------|-------------|
-| `my-amplifier` | Personal amplifier with dev-memory, deliberate-development, looper, vibecoding, and user habits enforcement |
-| `deliberate-development` | Decomposition-first workflow with planning/implementation phases |
-| `looper` | Supervised work loop that keeps working until done |
+Include these in your own bundle via `#subdirectory=` syntax:
+
+| Bundle | Description | Include As |
+|--------|-------------|------------|
+| `deliberate-development` | Decomposition-first workflow with planning/implementation phases | `git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/deliberate-development` |
+| `looper` | Supervised work loop that keeps working until done | `git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/looper` |
+
+**Example usage in your bundle.md:**
+```yaml
+includes:
+  - bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/looper
+  - bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/deliberate-development
+```
 
 ### Recipes (`recipes/`)
 
@@ -36,43 +38,13 @@ amplifier bundle use my-amplifier
 
 | Skill | Description |
 |-------|-------------|
-| `code-field` | Environmental prompting for rigorous code generation - surfaces edge cases, makes assumptions visible |
+| `code-field` | Environmental prompting for rigorous code generation |
 
 ### Tools (`tools/`)
 
 | Tool | Description |
 |------|-------------|
 | [`voice-bridge`](tools/voice-bridge/) | Control Amplifier sessions via voice from iPhone using Siri Shortcuts |
-
-## Usage
-
-### Using the Main Bundle
-
-```bash
-# Install and activate
-amplifier bundle add git+https://github.com/ramparte/amplifier-toolkit@main --name my-amplifier
-amplifier bundle use my-amplifier
-
-# Or run directly
-amplifier run --bundle git+https://github.com/ramparte/amplifier-toolkit@main
-```
-
-### Using Individual Bundles
-
-Reference sub-bundles in your own bundle's includes:
-
-```yaml
-includes:
-  - bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/deliberate-development
-  - bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/looper
-```
-
-### Using Recipes
-
-```bash
-amplifier recipes execute git+https://github.com/ramparte/amplifier-toolkit@main:recipes/feature-workflow.yaml \
-  --context '{"feature_name": "my-feature", "feature_description": "..."}'
-```
 
 ## License
 
