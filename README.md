@@ -18,7 +18,9 @@ Custom bundle configurations and behaviors.
 
 | Bundle | Description |
 |--------|-------------|
-| `my-amplifier` | Thin bundle combining foundation + dev-memory for staying current while having persistent local memory |
+| ~~`my-amplifier`~~ | ⚠️ **DEPRECATED** - Use the standalone repo: [ramparte/my-amplifier](https://github.com/ramparte/my-amplifier) |
+| `deliberate-development` | Deliberate practice patterns for development |
+| `looper` | Iterative refinement workflows |
 
 ### Recipes (`recipes/`)
 
@@ -62,16 +64,13 @@ amp-restore-sessions
 
 ### Using Bundles
 
-Use the my-amplifier bundle directly from GitHub:
+> **Note:** The `my-amplifier` bundle has moved to its own standalone repository for easier use.
+> Use: `git+https://github.com/ramparte/my-amplifier`
+
+For other bundles in this repo, reference them directly from GitHub:
 
 ```bash
-amplifier run --bundle git+https://github.com/ramparte/amplifier-toolkit@main:bundles/my-amplifier/bundle.md
-```
-
-Or set as default in `~/.amplifier/settings.yaml`:
-
-```yaml
-bundle: git+https://github.com/ramparte/amplifier-toolkit@main:bundles/my-amplifier/bundle.md
+amplifier run --bundle git+https://github.com/ramparte/amplifier-toolkit@main:bundles/deliberate-development/bundle.md
 ```
 
 ### Using Recipes
