@@ -1,88 +1,78 @@
 # Amplifier Toolkit
 
-Personal collection of Amplifier recipes, bundles, and extensions.
+Personal collection of Amplifier bundles, recipes, scripts, and extensions.
+
+## Quick Start
+
+```bash
+# Add the toolkit bundle (includes my-amplifier)
+amplifier bundle add git+https://github.com/ramparte/amplifier-toolkit@main --name my-amplifier
+amplifier bundle use my-amplifier
+```
 
 ## Contents
 
-### Scripts (`scripts/`)
-
-Utility scripts for Amplifier workflows.
-
-| Script | Description |
-|--------|-------------|
-| [`session-manager`](scripts/session-manager/) | Save and restore running Amplifier sessions across reboots (VS Code + WSL) |
-
 ### Bundles (`bundles/`)
-
-Custom bundle configurations and behaviors.
 
 | Bundle | Description |
 |--------|-------------|
-| ~~`my-amplifier`~~ | ⚠️ **DEPRECATED** - Use the standalone repo: [ramparte/my-amplifier](https://github.com/ramparte/my-amplifier) |
-| `deliberate-development` | Deliberate practice patterns for development |
-| `looper` | Iterative refinement workflows |
+| `my-amplifier` | Personal amplifier with dev-memory, deliberate-development, looper, vibecoding, and user habits enforcement |
+| `deliberate-development` | Decomposition-first workflow with planning/implementation phases |
+| `looper` | Supervised work loop that keeps working until done |
 
 ### Recipes (`recipes/`)
-
-Reusable multi-step workflows for common development tasks.
 
 | Recipe | Description |
 |--------|-------------|
 | `feature-workflow.yaml` | Complete feature development lifecycle with design review gate |
 
-### Skills (`skills/`)
+### Scripts (`scripts/`)
 
-Domain-specific knowledge and patterns.
+| Script | Description |
+|--------|-------------|
+| [`session-manager`](scripts/session-manager/) | Save and restore running Amplifier sessions across reboots (VS Code + WSL) |
+
+### Skills (`skills/`)
 
 | Skill | Description |
 |-------|-------------|
 | `code-field` | Environmental prompting for rigorous code generation - surfaces edge cases, makes assumptions visible |
 
-**Usage:** Say "using code field principles, [task]" or "apply code field to this implementation"
-
 ### Tools (`tools/`)
-
-Standalone tools and integrations for Amplifier.
 
 | Tool | Description |
 |------|-------------|
-| [`voice-bridge`](tools/voice-bridge/) | Control Amplifier sessions via voice from iPhone using Siri Shortcuts - discovers sessions, parses natural language commands, returns voice-friendly responses |
+| [`voice-bridge`](tools/voice-bridge/) | Control Amplifier sessions via voice from iPhone using Siri Shortcuts |
 
 ## Usage
 
-### Using Scripts
-
-See individual script READMEs for installation and usage. Example:
+### Using the Main Bundle
 
 ```bash
-# Save current Amplifier sessions before rebooting
-amp-save-sessions
+# Install and activate
+amplifier bundle add git+https://github.com/ramparte/amplifier-toolkit@main --name my-amplifier
+amplifier bundle use my-amplifier
 
-# Restore sessions after reboot
-amp-restore-sessions
+# Or run directly
+amplifier run --bundle git+https://github.com/ramparte/amplifier-toolkit@main
 ```
 
-### Using Bundles
+### Using Individual Bundles
 
-> **Note:** The `my-amplifier` bundle has moved to its own standalone repository for easier use.
-> Use: `git+https://github.com/ramparte/my-amplifier`
+Reference sub-bundles in your own bundle's includes:
 
-For other bundles in this repo, reference them directly from GitHub:
-
-```bash
-amplifier run --bundle git+https://github.com/ramparte/amplifier-toolkit@main:bundles/deliberate-development/bundle.md
+```yaml
+includes:
+  - bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/deliberate-development
+  - bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/looper
 ```
 
 ### Using Recipes
 
-Reference recipes directly from GitHub:
-
 ```bash
 amplifier recipes execute git+https://github.com/ramparte/amplifier-toolkit@main:recipes/feature-workflow.yaml \
-  --context '{"feature_name": "my-feature", "feature_description": "...", "target_directory": "src/feature"}'
+  --context '{"feature_name": "my-feature", "feature_description": "..."}'
 ```
-
-Or clone locally and reference by path.
 
 ## License
 
