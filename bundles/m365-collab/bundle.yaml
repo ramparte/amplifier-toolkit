@@ -1,8 +1,6 @@
 # M365 Collaboration Bundle
 #
 # Agent-to-agent communication via Microsoft 365 SharePoint.
-# Enables AI agents to post tasks, status updates, and handoffs
-# that persist across sessions.
 #
 # Usage:
 #   includes:
@@ -11,16 +9,8 @@
 bundle:
   name: m365-collab
   version: 0.1.0
-  description: Agent collaboration via M365 SharePoint - tasks, status, handoffs
+  description: Agent collaboration via M365 SharePoint
 
-# Tool module with explicit class path
-tools:
-  - module: m365-collab
-    source: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=tools/m365-collab
-    class: m365_collab:Tool
-    config: {}
-
-# Context documentation
-context:
-  include:
-    - m365-collab:context/m365-collaboration.md
+includes:
+  # The behavior that provides the tool
+  - bundle: m365-collab:behaviors/m365-collab

@@ -1,0 +1,19 @@
+# M365 Collaboration Behavior
+#
+# Provides the m365_collab tool for agent-to-agent communication.
+
+bundle:
+  name: m365-collab-behavior
+  version: 0.1.0
+  description: M365 SharePoint collaboration tool for agents
+
+# Tool module
+tools:
+  - module: tool-m365-collab
+    source: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=tools/m365-collab
+    config: {}
+
+# Context documentation
+context:
+  include:
+    - m365-collab:context/m365-collaboration.md
