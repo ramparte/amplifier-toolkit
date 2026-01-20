@@ -77,23 +77,12 @@ Examples:
         }
 
     async def execute(self, input_data: dict[str, Any]) -> ToolResult:
-        """Execute the M365 collaboration tool.
-
-        Args:
-            input_data: Tool input with operation and parameters
-
-        Returns:
-            ToolResult with operation output
-        """
+        """Execute the M365 collaboration tool."""
         try:
             client = self._get_client()
             operation = input_data.get("operation")
-            
-            # Remove operation from kwargs passed to client
             kwargs = {k: v for k, v in input_data.items() if k != "operation"}
-            
             result = client.execute(operation, **kwargs)
-            
             return ToolResult(
                 success=result.get("success", False),
                 output=result
@@ -106,27 +95,15 @@ Examples:
 
 
 async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Mount the m365_collab tool into the coordinator.
-
-    Args:
-        coordinator: The Amplifier coordinator instance
-        config: Optional module configuration
-
-    Returns:
-        Module metadata
-    """
+    """Mount the m365_collab tool into the coordinator."""
     tool = M365CollabAgentTool()
-
-    # Register the tool
     await coordinator.mount("tools", tool, name=tool.name)
-
     return {
-        "name": "m365-collab",
+        "name": "tool-m365-collab",
         "version": "0.1.0",
         "provides": ["m365_collab"],
     }
 
 
-# Keep exports for direct usage
 __all__ = ["M365CollabAgentTool", "mount"]
 __version__ = "0.1.0"

@@ -160,7 +160,7 @@ amp-restore-sessions --dry-run
 
 | File | Purpose |
 |------|---------|
-| `~/.amplifier/session-history.json` | All saved session groups |
+| `~/.amp-session-history.json` | All saved session groups (outside ~/.amplifier to survive reset) |
 | `/tmp/.amp-restore-triggers.json` | Temporary trigger file |
 | `~/.local/bin/amp-*` | The scripts |
 

@@ -5,7 +5,15 @@
 
 set -e
 
-HISTORY_FILE="$HOME/.amplifier/session-history.json"
+# Store outside of ~/.amplifier to survive amplifier reset/cache clearing
+HISTORY_FILE="$HOME/.amp-session-history.json"
+
+# Migrate from old location if needed
+OLD_HISTORY="$HOME/.amplifier/session-history.json"
+if [[ -f "$OLD_HISTORY" && ! -f "$HISTORY_FILE" ]]; then
+    mv "$OLD_HISTORY" "$HISTORY_FILE"
+    echo -e "${BLUE}Migrated session history to $HISTORY_FILE${NC}"
+fi
 
 # Colors for output
 GREEN='\033[0;32m'

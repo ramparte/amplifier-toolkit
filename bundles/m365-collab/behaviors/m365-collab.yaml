@@ -7,7 +7,7 @@ bundle:
   version: 0.1.0
   description: M365 SharePoint collaboration tool for agents
 
-# Tool module
+# Tool module - matches the entry point name in pyproject.toml
 tools:
   - module: tool-m365-collab
     source: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=tools/m365-collab

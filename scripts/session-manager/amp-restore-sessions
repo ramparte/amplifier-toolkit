@@ -5,7 +5,8 @@
 
 set -e
 
-HISTORY_FILE="$HOME/.amplifier/session-history.json"
+# Store outside of ~/.amplifier to survive amplifier reset/cache clearing
+HISTORY_FILE="$HOME/.amp-session-history.json"
 TRIGGER_FILE="/tmp/.amp-restore-triggers.json"
 
 # Colors for output
