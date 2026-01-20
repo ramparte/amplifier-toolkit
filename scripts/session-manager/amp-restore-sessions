@@ -1,11 +1,12 @@
 #!/bin/bash
 # amp-restore-sessions - Restore previously saved Amplifier sessions
-# Opens VS Code windows for each session and resumes them
+# Opens VS Code windows with integrated WSL terminals running amplifier resume
+# Supports multiple sessions per directory (multiple terminals in same window)
 
 set -e
 
 HISTORY_FILE="$HOME/.amplifier/session-history.json"
-TRIGGER_FILE="/tmp/.amp-autorun"
+TRIGGER_FILE="/tmp/.amp-restore-triggers.json"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -41,7 +42,7 @@ while [[ $# -gt 0 ]]; do
         --help|-h)
             echo "Usage: amp-restore-sessions [OPTIONS]"
             echo ""
-            echo "Restore previously saved Amplifier sessions in VS Code windows."
+            echo "Restore previously saved Amplifier sessions in VS Code."
             echo ""
             echo "Options:"
             echo "  -l, --list       List all saved session groups and pick one"
@@ -50,6 +51,14 @@ while [[ $# -gt 0 ]]; do
             echo "  -h, --help       Show this help message"
             echo ""
             echo "By default, restores the most recent save."
+            echo ""
+            echo "Each session opens in a VS Code window with an integrated"
+            echo "WSL terminal running 'amplifier resume <session_id>'."
+            echo ""
+            echo "Multiple sessions in the same directory open multiple terminals"
+            echo "in the same VS Code window."
+            echo ""
+            echo "SETUP REQUIRED: Add the bashrc snippet from README.md"
             exit 0
             ;;
         *)
@@ -82,12 +91,15 @@ display_save() {
     local id=$(echo "$save" | jq -r '.id')
     local saved_at=$(echo "$save" | jq -r '.saved_at')
     local session_count=$(echo "$save" | jq '.sessions | length')
+    local dir_count=$(echo "$save" | jq '[.sessions[].directory] | unique | length')
     
-    # Format the timestamp nicely
     local formatted_date=$(date -d "$saved_at" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$saved_at")
     
-    echo -e "  ${CYAN}#${id}${NC} - ${formatted_date} (${session_count} session(s))"
-    echo "$save" | jq -r '.sessions[] | "      \(.directory)"'
+    echo -e "  ${CYAN}#${id}${NC} - ${formatted_date} (${session_count} session(s) in ${dir_count} window(s))"
+    
+    # Group by directory for display
+    echo "$save" | jq -r '.sessions | group_by(.directory) | .[] | 
+        "      \(.[0].directory): \(length) terminal(s)"'
 }
 
 # List mode: show all saves and let user pick
@@ -95,7 +107,6 @@ if $LIST_MODE; then
     echo -e "${BLUE}${BOLD}Saved Session Groups:${NC}"
     echo ""
     
-    # Display all saves (newest first)
     echo "$history" | jq -c '.saves | reverse | .[]' | while read -r save; do
         display_save "$save"
         echo ""
@@ -114,7 +125,6 @@ fi
 
 # Determine which save to restore
 if [[ -n "$SELECTED_ID" ]]; then
-    # User specified an ID
     selected_save=$(echo "$history" | jq --arg id "$SELECTED_ID" '.saves[] | select(.id == ($id | tonumber))')
     if [[ -z "$selected_save" ]]; then
         echo -e "${RED}Save #${SELECTED_ID} not found.${NC}"
@@ -122,7 +132,6 @@ if [[ -n "$SELECTED_ID" ]]; then
         exit 1
     fi
 else
-    # Default: get the most recent save (last in array)
     selected_save=$(echo "$history" | jq '.saves | last')
 fi
 
@@ -130,37 +139,77 @@ fi
 save_id=$(echo "$selected_save" | jq -r '.id')
 saved_at=$(echo "$selected_save" | jq -r '.saved_at')
 session_count=$(echo "$selected_save" | jq '.sessions | length')
+dir_count=$(echo "$selected_save" | jq '[.sessions[].directory] | unique | length')
 
 echo -e "${BLUE}Restoring save #${save_id} from ${saved_at}${NC}"
-echo -e "${BLUE}(${session_count} session(s))${NC}"
+echo -e "${BLUE}(${session_count} session(s) in ${dir_count} VS Code window(s))${NC}"
 echo ""
 
-# Process each session
+if $DRY_RUN; then
+    echo "$selected_save" | jq -r '.sessions | group_by(.directory) | .[] | 
+        "  → \(.[0].directory): \(length) terminal(s)\n" + 
+        (reduce .[] as $s (""; . + "      Session: \($s.session_id)\n"))'
+    echo ""
+    echo -e "${YELLOW}Dry run - no sessions were restored.${NC}"
+    exit 0
+fi
+
+# Build trigger file - this time with ARRAY of commands per directory
+# Each terminal that opens will pop the first command from its directory's array
+triggers="{}"
 while IFS= read -r session; do
     session_id=$(echo "$session" | jq -r '.session_id')
     directory=$(echo "$session" | jq -r '.directory')
     
-    echo -e "  ${GREEN}→${NC} $directory"
-    echo -e "    Session: $session_id"
-    
-    if $DRY_RUN; then
-        continue
+    if [[ "$session_id" == "UNKNOWN" ]]; then
+        cmd="amplifier resume"
+    else
+        cmd="amplifier resume '$session_id'"
     fi
     
-    # Write trigger file with resume command
-    echo "amplifier session resume '$session_id'" > "$TRIGGER_FILE"
-    
-    # Open VS Code window
-    code --new-window --remote "wsl+$WSL_DISTRO" "$directory"
-    
-    # Wait for VS Code to pick up the trigger file
-    sleep 2
-    
+    # Add command to array for this directory
+    triggers=$(echo "$triggers" | jq --arg dir "$directory" --arg cmd "$cmd" '
+        if .[$dir] then
+            .[$dir] += [$cmd]
+        else
+            .[$dir] = [$cmd]
+        end
+    ')
 done < <(echo "$selected_save" | jq -c '.sessions[]')
 
+# Write trigger file
+echo "$triggers" > "$TRIGGER_FILE"
+chmod 644 "$TRIGGER_FILE"
+
+# Group sessions by directory
+directories=$(echo "$selected_save" | jq -r '[.sessions[].directory] | unique | .[]')
+
+for directory in $directories; do
+    # Count sessions for this directory
+    term_count=$(echo "$selected_save" | jq --arg dir "$directory" '[.sessions[] | select(.directory == $dir)] | length')
+    
+    echo -e "  ${GREEN}→${NC} $directory (${term_count} terminal(s))"
+    
+    # Show session IDs
+    echo "$selected_save" | jq -r --arg dir "$directory" '
+        .sessions[] | select(.directory == $dir) | 
+        "      Session: \(.session_id)"'
+    
+    # Open VS Code window
+    code --new-window --remote "wsl+$WSL_DISTRO" "$directory" &
+    sleep 2
+    
+    # Open terminals - one for each session in this directory
+    for ((i=0; i<term_count; i++)); do
+        code --remote "wsl+$WSL_DISTRO" "$directory" --command "workbench.action.terminal.new"
+        sleep 0.8
+    done
+    
+    # Delay before next window
+    sleep 1
+done
+
 echo ""
-if $DRY_RUN; then
-    echo -e "${YELLOW}Dry run - no sessions were restored.${NC}"
-else
-    echo -e "${GREEN}VS Code windows opened with sessions resuming.${NC}"
-fi
+echo -e "${GREEN}VS Code windows opened with terminals!${NC}"
+echo ""
+echo -e "${BLUE}Note:${NC} If terminals didn't auto-run, add the bashrc snippet from README.md"

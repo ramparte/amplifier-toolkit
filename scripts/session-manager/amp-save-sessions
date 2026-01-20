@@ -1,7 +1,7 @@
 #!/bin/bash
-# amp-save-sessions - Save Amplifier sessions from open VS Code WSL terminals
-# Finds VS Code terminal windows and looks up their most recent amplifier sessions
-# Appends session snapshots to ~/.amplifier/session-history.json with numbered entries
+# amp-save-sessions - Save ALL running Amplifier sessions
+# Scans for amplifier processes directly and extracts session IDs
+# Supports multiple sessions per directory (multiple terminals in same VS Code window)
 
 set -e
 
@@ -12,70 +12,135 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'
+NC='\033[0m'
 
-echo -e "${BLUE}Scanning for VS Code WSL terminals with Amplifier sessions...${NC}"
+echo -e "${BLUE}Scanning for running Amplifier sessions...${NC}"
 
-# Find VS Code terminal bash shells by looking for the shellIntegration init file
-# This finds all open VS Code terminal windows, regardless of whether amplifier is running
-declare -A seen_dirs  # Track unique directories
+# Find all running amplifier processes
 sessions=()
+unknown_count=0
 
-while IFS= read -r pid; do
-    [[ -z "$pid" ]] && continue
+for amp_pid in $(pgrep -f '/\.local/bin/amplifier' 2>/dev/null); do
+    # Get command line
+    cmdline=$(cat "/proc/$amp_pid/cmdline" 2>/dev/null | tr '\0' ' ') || continue
     
-    # Get the working directory
-    cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
+    # Skip diagnostic/grep commands
+    [[ "$cmdline" == *"pgrep"* ]] && continue
+    [[ "$cmdline" == *"Scanning"* ]] && continue
     
-    # Skip if we've already processed this directory
-    [[ -n "${seen_dirs[$cwd]}" ]] && continue
-    seen_dirs[$cwd]=1
+    # Get working directory
+    amp_cwd=$(readlink "/proc/$amp_pid/cwd" 2>/dev/null) || continue
     
-    # Convert cwd to project path format (replace / with -)
-    project_path=$(echo "$cwd" | sed 's|^/||; s|/|-|g; s|^|-|')
-    project_dir="$HOME/.amplifier/projects/$project_path/sessions"
+    # Get process start time
+    proc_start=$(stat -c %Y /proc/$amp_pid 2>/dev/null) || continue
     
-    # Skip if no sessions directory for this project
-    [[ ! -d "$project_dir" ]] && continue
-    
-    # Find the most recent root session (UUID only, not sub-agent sessions with underscores)
-    # Root sessions are 36-char UUIDs, sub-sessions have _suffix
+    # Try to find session ID from command line first
     session_id=""
-    latest_time=0
     
-    for session_dir in "$project_dir"/*/; do
-        [[ ! -d "$session_dir" ]] && continue
-        
-        # Get just the directory name
-        dir_name=$(basename "$session_dir")
-        
-        # Skip sub-agent sessions (they contain underscore after UUID)
-        # Root sessions are exactly 36 chars (UUID format: 8-4-4-4-12)
-        if [[ ${#dir_name} -eq 36 ]] && [[ "$dir_name" =~ ^[0-9a-f-]+$ ]]; then
-            # Get modification time
-            mod_time=$(stat -c %Y "$session_dir" 2>/dev/null) || continue
-            
-            if [[ $mod_time -gt $latest_time ]]; then
-                latest_time=$mod_time
-                session_id="$dir_name"
-            fi
+    # Full UUID format
+    session_id=$(echo "$cmdline" | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+    
+    # Short ID format (8 chars after 'resume')
+    if [[ -z "$session_id" ]]; then
+        short_id=$(echo "$cmdline" | grep -oP 'resume\s+\K[0-9a-f]{8}' | head -1)
+        if [[ -n "$short_id" ]]; then
+            # Expand short ID to full UUID by finding matching session
+            project_path=$(echo "$amp_cwd" | sed 's|^/||; s|/|-|g; s|^|-|')
+            project_dir="$HOME/.amplifier/projects/$project_path/sessions"
+            for d in "$project_dir"/"$short_id"*/; do
+                if [[ -d "$d" ]]; then
+                    session_id=$(basename "$d")
+                    break
+                fi
+            done
         fi
-    done
-    
-    # Only save if we found a session
-    if [[ -n "$session_id" ]]; then
-        sessions+=("{\"session_id\": \"$session_id\", \"directory\": \"$cwd\", \"terminal_pid\": $pid}")
-        echo -e "  ${CYAN}Found:${NC} $cwd"
     fi
-done < <(pgrep -f 'shellIntegration-bash' 2>/dev/null)
+    
+    # If not in command line, try to correlate by timing
+    if [[ -z "$session_id" ]]; then
+        project_path=$(echo "$amp_cwd" | sed 's|^/||; s|/|-|g; s|^|-|')
+        project_dir="$HOME/.amplifier/projects/$project_path/sessions"
+        
+        best_match=""
+        best_diff=9999999
+        
+        for session_dir in "$project_dir"/*/; do
+            [[ ! -d "$session_dir" ]] && continue
+            dir_name=$(basename "$session_dir")
+            [[ "$dir_name" == *"_"* ]] && continue  # skip sub-sessions
+            
+            metadata="$session_dir/metadata.json"
+            [[ ! -f "$metadata" ]] && continue
+            
+            # Get session creation time
+            created=$(jq -r '.created' "$metadata" 2>/dev/null)
+            [[ -z "$created" || "$created" == "null" ]] && continue
+            
+            session_start=$(date -d "$created" +%s 2>/dev/null) || continue
+            
+            # Process started within 120 seconds of session creation = likely match
+            diff=$((proc_start - session_start))
+            [[ $diff -lt 0 ]] && diff=$((-diff))
+            
+            if [[ $diff -lt 120 && $diff -lt $best_diff ]]; then
+                best_diff=$diff
+                best_match="$dir_name"
+            fi
+        done
+        
+        session_id="$best_match"
+    fi
+    
+    # If still no match, try finding by recent modification (for resumed sessions)
+    if [[ -z "$session_id" ]]; then
+        project_path=$(echo "$amp_cwd" | sed 's|^/||; s|/|-|g; s|^|-|')
+        project_dir="$HOME/.amplifier/projects/$project_path/sessions"
+        
+        # Find sessions modified after process start (active sessions)
+        for session_dir in "$project_dir"/*/; do
+            [[ ! -d "$session_dir" ]] && continue
+            dir_name=$(basename "$session_dir")
+            [[ "$dir_name" == *"_"* ]] && continue
+            
+            events="$session_dir/events.jsonl"
+            [[ ! -f "$events" ]] && continue
+            
+            mod_time=$(stat -c %Y "$events")
+            # Session must have been modified AFTER process started and within last 5 min
+            now=$(date +%s)
+            if [[ $mod_time -gt $proc_start && $((now - mod_time)) -lt 300 ]]; then
+                # This is a candidate - but we might have multiple
+                # For now, just take the most recently modified
+                if [[ -z "$session_id" ]] || [[ $mod_time -gt $best_mod ]]; then
+                    session_id="$dir_name"
+                    best_mod=$mod_time
+                fi
+            fi
+        done
+    fi
+    
+    # Report what we found
+    if [[ -n "$session_id" ]]; then
+        sessions+=("{\"session_id\": \"$session_id\", \"directory\": \"$amp_cwd\", \"amplifier_pid\": $amp_pid}")
+        echo -e "  ${GREEN}✓${NC} $amp_cwd"
+        echo -e "    Session: ${session_id:0:8}..."
+    else
+        # Still save it with a placeholder so we know a session exists here
+        sessions+=("{\"session_id\": \"UNKNOWN\", \"directory\": \"$amp_cwd\", \"amplifier_pid\": $amp_pid}")
+        echo -e "  ${YELLOW}?${NC} $amp_cwd"
+        echo -e "    Session: ${YELLOW}unknown${NC} (will use most recent on restore)"
+        unknown_count=$((unknown_count + 1))
+    fi
+done
 
 # Check if we found any sessions
 if [[ ${#sessions[@]} -eq 0 ]]; then
-    echo -e "${YELLOW}No VS Code terminals with Amplifier sessions found.${NC}"
+    echo -e "${YELLOW}No running Amplifier sessions found.${NC}"
     echo ""
     echo "Tips:"
-    echo "  - Make sure you have VS Code WSL terminals open"
-    echo "  - The terminal's working directory must have had an amplifier session"
+    echo "  - Make sure you have Amplifier sessions running"
+    echo "  - This script finds 'amplifier' processes, not just open terminals"
     exit 0
 fi
 
@@ -87,6 +152,7 @@ timestamp=$(date -Iseconds)
 
 # Initialize history file if it doesn't exist
 if [[ ! -f "$HISTORY_FILE" ]]; then
+    mkdir -p "$(dirname "$HISTORY_FILE")"
     echo '{"saves": [], "next_id": 1}' > "$HISTORY_FILE"
 fi
 
@@ -109,11 +175,22 @@ updated_history=$(echo "$current_history" | jq \
 # Save updated history
 echo "$updated_history" > "$HISTORY_FILE"
 
-# Display results
+# Display summary
 echo ""
 echo -e "${GREEN}Saved ${#sessions[@]} session(s) as save #${next_id}${NC}"
+
+# Group by directory for display
 echo ""
-echo "$json_sessions" | jq -r '.[] | "  \(.directory) -> \(.session_id)"'
+echo "$json_sessions" | jq -r 'group_by(.directory) | .[] | 
+    "  \(.[0].directory): \(length) session(s)" + 
+    (if length > 1 then " ⚡" else "" end)'
+
+if [[ $unknown_count -gt 0 ]]; then
+    echo ""
+    echo -e "${YELLOW}Note: $unknown_count session(s) have unknown IDs.${NC}"
+    echo -e "      They will restore using 'amplifier resume' (most recent session)."
+fi
+
 echo ""
 echo -e "${BLUE}History now contains $(echo "$updated_history" | jq '.saves | length') save(s)${NC}"
-echo -e "To restore, run: ${GREEN}amp-restore-sessions${NC} (latest) or ${GREEN}amp-restore-sessions --list${NC} (pick one)"
+echo -e "To restore: ${GREEN}amp-restore-sessions${NC} or ${GREEN}amp-restore-sessions --list${NC}"

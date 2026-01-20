@@ -2,17 +2,18 @@
 
 Save and restore running Amplifier sessions across reboots. Designed for VS Code + WSL workflows.
 
+**Supports multiple sessions per directory** - if you have multiple terminals in the same VS Code window, they'll all be saved and restored.
+
 ## What It Does
 
-- **`amp-save-sessions`** - Scans for running Amplifier processes, captures their session IDs and working directories, appends to a numbered history
-- **`amp-restore-sessions`** - Restores sessions from history; defaults to most recent, or lets you pick from past saves
+- **`amp-save-sessions`** - Finds ALL running Amplifier processes, extracts their session IDs, and saves them to numbered history
+- **`amp-restore-sessions`** - Opens VS Code windows with integrated WSL terminals running `amplifier resume`
 
 ## Installation
 
 ### 1. Install the scripts
 
 ```bash
-# Clone this repo (or just download the scripts)
 mkdir -p ~/.local/bin
 
 # Copy scripts to your PATH
@@ -24,22 +25,33 @@ chmod +x ~/.local/bin/amp-save-sessions
 chmod +x ~/.local/bin/amp-restore-sessions
 ```
 
-### 2. Add auto-run trigger to your shell
+### 2. Add the bashrc trigger (REQUIRED)
 
 Add this to the **end** of your `~/.bashrc`:
 
 ```bash
-# Auto-run amplifier commands from trigger file
-if [[ -f /tmp/.amp-autorun ]]; then
-    cmd=$(cat /tmp/.amp-autorun)
-    rm /tmp/.amp-autorun
-    eval "$cmd"
+# Amplifier session restore trigger
+# Supports multiple sessions per directory (pops from array)
+if [[ -f /tmp/.amp-restore-triggers.json ]]; then
+    _amp_cmds=$(jq -r --arg pwd "$PWD" '.[$pwd] // empty' /tmp/.amp-restore-triggers.json 2>/dev/null)
+    if [[ -n "$_amp_cmds" && "$_amp_cmds" != "null" ]]; then
+        # Get the first command from the array
+        _amp_cmd=$(echo "$_amp_cmds" | jq -r '.[0] // empty' 2>/dev/null)
+        if [[ -n "$_amp_cmd" && "$_amp_cmd" != "null" ]]; then
+            # Remove the first command from the array (shift)
+            jq --arg pwd "$PWD" '.[$pwd] = .[$pwd][1:]' /tmp/.amp-restore-triggers.json > /tmp/.amp-restore-triggers.json.tmp
+            mv /tmp/.amp-restore-triggers.json.tmp /tmp/.amp-restore-triggers.json
+            # Run the command
+            eval "$_amp_cmd"
+        fi
+    fi
+    unset _amp_cmd _amp_cmds
 fi
 ```
 
 ### 3. (Optional) VS Code settings
 
-To prevent the explorer pane from opening in new windows, add to your VS Code settings (Ctrl+Shift+P → "Preferences: Open User Settings (JSON)"):
+To prevent the welcome tab from opening in new windows:
 
 ```json
 {
@@ -58,21 +70,27 @@ amp-save-sessions
 Output:
 ```
 Scanning for running Amplifier sessions...
-Saved 2 session(s) as save #3
+  ✓ /mnt/c/projects/app1
+    Session: abc12345...
+  ✓ /mnt/c/projects/app1
+    Session: def67890...
+  ✓ /mnt/c/projects/app2
+    Session: 3f075...
 
-  /mnt/c/projects/app1 → abc123-session-id
-  /mnt/c/projects/app2 → def456-session-id
+Saved 3 session(s) as save #3
+
+  /mnt/c/projects/app1: 2 session(s) ⚡
+  /mnt/c/projects/app2: 1 session(s)
 
 History now contains 3 save(s)
-To restore, run: amp-restore-sessions (latest) or amp-restore-sessions --list (pick one)
 ```
 
-Each save is numbered and preserved in history. You can save multiple times without losing previous saves.
+The ⚡ indicates multiple sessions in the same directory.
 
 ### Restore sessions after reboot
 
 ```bash
-# Restore the most recent save (default)
+# Restore the most recent save
 amp-restore-sessions
 
 # List all saves and pick one
@@ -81,6 +99,8 @@ amp-restore-sessions --list
 # Restore a specific save by ID
 amp-restore-sessions --id 2
 ```
+
+Each directory opens a VS Code window. If a directory had multiple sessions, multiple terminals open in that window.
 
 ### List mode
 
@@ -92,17 +112,13 @@ Output:
 ```
 Saved Session Groups:
 
-  #3 - 2026-01-15 10:30 (2 session(s))
-      /mnt/c/projects/app1
-      /mnt/c/projects/app2
+  #3 - 2026-01-15 10:30 (3 session(s) in 2 window(s))
+      /mnt/c/projects/app1: 2 terminal(s)
+      /mnt/c/projects/app2: 1 terminal(s)
 
-  #2 - 2026-01-14 18:00 (3 session(s))
-      /mnt/c/projects/app1
-      /mnt/c/projects/app2
-      /mnt/c/projects/app3
-
-  #1 - 2026-01-13 09:15 (1 session(s))
-      /mnt/c/projects/app1
+  #2 - 2026-01-14 18:00 (2 session(s) in 2 window(s))
+      /mnt/c/projects/app1: 1 terminal(s)
+      /mnt/c/projects/app2: 1 terminal(s)
 
 Enter save ID to restore (or 'q' to quit):
 ```
@@ -111,34 +127,63 @@ Enter save ID to restore (or 'q' to quit):
 
 ```bash
 amp-restore-sessions --dry-run
-amp-restore-sessions --list --dry-run
 ```
 
 ## How It Works
 
-1. **Save**: Scans `/proc` for running Amplifier processes, extracts working directories and session IDs, appends a numbered entry to `~/.amplifier/session-history.json`
+### Save
 
-2. **Restore**: For each session in the selected save:
-   - Writes the resume command to `/tmp/.amp-autorun`
-   - Opens VS Code with `code --new-window --remote wsl+<distro> <directory>`
-   - VS Code opens a terminal, which sources `~/.bashrc`
-   - The bashrc trigger reads and executes the command, then deletes the trigger file
+1. Finds all running `amplifier` processes (not just bash shells)
+2. For each process, extracts the session ID from:
+   - Command line arguments (if explicitly provided)
+   - Timing correlation with session creation
+   - Recent session modification times
+3. Groups sessions by directory
+4. Saves to `~/.amplifier/session-history.json`
+
+### Restore
+
+1. Creates trigger file with **array** of commands per directory
+2. Opens VS Code windows (one per unique directory)
+3. Opens integrated terminals (one per session in that directory)
+4. Each terminal's bashrc pops the next command from the array and runs it
 
 ## Requirements
 
 - WSL (Windows Subsystem for Linux)
 - VS Code with Remote - WSL extension
-- `jq` for JSON parsing (install via `apt install jq`)
+- `jq` for JSON parsing (`apt install jq`)
 - Amplifier CLI installed
+- The bashrc trigger snippet (see Installation step 2)
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `~/.amplifier/session-history.json` | All saved session groups (numbered) |
-| `/tmp/.amp-autorun` | Temporary trigger file (auto-deleted) |
+| `~/.amplifier/session-history.json` | All saved session groups |
+| `/tmp/.amp-restore-triggers.json` | Temporary trigger file |
 | `~/.local/bin/amp-*` | The scripts |
 
-## Migration from Old Format
+## Troubleshooting
 
-If you have an existing `~/.amplifier/saved-sessions.json` from the old single-save format, you can safely delete it. The new scripts use `session-history.json` with a different structure that supports multiple saves.
+### "No running Amplifier sessions found"
+
+The script looks for actual `amplifier` processes, not just open terminals. Make sure you have amplifier sessions actively running.
+
+### Some sessions show "UNKNOWN" 
+
+The script couldn't determine the exact session ID. On restore, these will use `amplifier resume` (resumes most recent session for that directory).
+
+### Terminals open but don't run the resume command
+
+1. Ensure the bashrc snippet is installed
+2. Check `jq` is installed: `which jq`
+3. Verify trigger file: `cat /tmp/.amp-restore-triggers.json`
+
+### Multiple terminals but same session resumes
+
+If you had multiple `amplifier resume` (without explicit IDs) in the same directory, they were all resuming the same session. The save script can only detect what was actually running.
+
+## Migration
+
+Delete any old trigger snippets from `~/.bashrc` that reference `/tmp/.amp-autorun` - the new system uses `/tmp/.amp-restore-triggers.json` with a different format.
