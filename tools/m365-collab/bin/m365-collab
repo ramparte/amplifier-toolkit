@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""M365 Agent Collaboration CLI.
+
+Simple CLI for agent-to-agent communication via SharePoint.
+Credentials from environment: M365_TENANT_ID, M365_CLIENT_ID, M365_CLIENT_SECRET
+"""
+
+import argparse
+import json
+import os
+import sys
+import uuid
+from datetime import datetime, timezone
+
+try:
+    import msal
+    import httpx
+except ImportError:
+    print("ERROR: Required packages not installed. Run: pip install msal httpx", file=sys.stderr)
+    sys.exit(1)
+
+
+class M365Collab:
+    """M365 SharePoint collaboration client."""
+
+    GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+    FOLDER = "AgentMessages"
+
+    def __init__(self):
+        self.tenant_id = os.environ.get("M365_TENANT_ID")
+        self.client_id = os.environ.get("M365_CLIENT_ID")
+        self.client_secret = os.environ.get("M365_CLIENT_SECRET")
+
+        if not all([self.tenant_id, self.client_id, self.client_secret]):
+            missing = [k for k in ["M365_TENANT_ID", "M365_CLIENT_ID", "M365_CLIENT_SECRET"]
+                       if not os.environ.get(k)]
+            raise ValueError(f"Missing environment variables: {', '.join(missing)}")
+
+        self._app = msal.ConfidentialClientApplication(
+            client_id=self.client_id,
+            client_credential=self.client_secret,
+            authority=f"https://login.microsoftonline.com/{self.tenant_id}",
+        )
+        self._http = httpx.Client(timeout=30.0)
+        self._drive_id = None
+        self._token = None
+
+    def _get_token(self):
+        result = self._app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
+        if "access_token" in result:
+            return result["access_token"]
+        raise RuntimeError(f"Auth failed: {result.get('error_description', result)}")
+
+    def _request(self, method, path, json_data=None, content=None):
+        url = f"{self.GRAPH_BASE}{path}"
+        headers = {"Authorization": f"Bearer {self._get_token()}", "Content-Type": "application/json"}
+        if content:
+            return self._http.request(method, url, headers=headers, content=content)
+        elif json_data:
+            return self._http.request(method, url, headers=headers, json=json_data)
+        return self._http.request(method, url, headers=headers)
+
+    @property
+    def drive_id(self):
+        if not self._drive_id:
+            resp = self._request("GET", "/sites/root/drive")
+            if resp.status_code == 200:
+                self._drive_id = resp.json()["id"]
+            else:
+                raise RuntimeError(f"Failed to get drive: {resp.text}")
+        return self._drive_id
+
+    def get_messages(self, message_type=None, status=None, limit=50):
+        """Get messages from SharePoint."""
+        resp = self._request("GET", f"/drives/{self.drive_id}/root:/{self.FOLDER}:/children?$top={limit}")
+        if resp.status_code != 200:
+            return []
+        
+        messages = []
+        for item in resp.json().get("value", []):
+            if not item["name"].endswith(".json"):
+                continue
+            url = item.get("@microsoft.graph.downloadUrl")
+            if url:
+                content = self._http.get(url)
+                if content.status_code == 200:
+                    try:
+                        msg = content.json()
+                        if message_type and msg.get("message_type") != message_type:
+                            continue
+                        if status and msg.get("status") != status:
+                            continue
+                        messages.append(msg)
+                    except:
+                        pass
+        return messages
+
+    def get_pending_tasks(self):
+        """Get pending tasks."""
+        return self.get_messages(message_type="task", status="pending")
+
+    def post_message(self, title, content, message_type="message", priority="normal", context=None):
+        """Post a message to SharePoint."""
+        # Ensure folder exists
+        self._request("POST", f"/drives/{self.drive_id}/root/children",
+                     json_data={"name": self.FOLDER, "folder": {}, "@microsoft.graph.conflictBehavior": "fail"})
+        
+        msg = {
+            "id": f"msg-{uuid.uuid4().hex[:12]}",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "agent_id": f"amplifier-{os.getpid()}",
+            "message_type": message_type,
+            "title": title,
+            "content": content,
+            "priority": priority,
+            "status": "pending" if message_type == "task" else "completed",
+            "context": context or {},
+        }
+        
+        resp = self._request("PUT",
+                           f"/drives/{self.drive_id}/root:/{self.FOLDER}/{msg['id']}.json:/content",
+                           content=json.dumps(msg, indent=2).encode())
+        if resp.status_code in (200, 201):
+            return msg
+        raise RuntimeError(f"Failed to post: {resp.text}")
+
+    def update_status(self, task_id, status, context_update=None):
+        """Update a message's status."""
+        filename = f"{task_id}.json" if not task_id.endswith(".json") else task_id
+        resp = self._request("GET", f"/drives/{self.drive_id}/root:/{self.FOLDER}/{filename}:/content")
+        if resp.status_code != 200:
+            return None
+        
+        msg = resp.json()
+        msg["status"] = status
+        msg["timestamp"] = datetime.now(timezone.utc).isoformat()
+        if context_update:
+            msg.setdefault("context", {}).update(context_update)
+        
+        resp = self._request("PUT",
+                           f"/drives/{self.drive_id}/root:/{self.FOLDER}/{filename}:/content",
+                           content=json.dumps(msg, indent=2).encode())
+        return msg if resp.status_code in (200, 201) else None
+
+
+def main():
+    parser = argparse.ArgumentParser(description="M365 Agent Collaboration")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    # get-pending-tasks
+    sub.add_parser("get-pending-tasks", help="Get pending tasks")
+    
+    # get-messages  
+    gm = sub.add_parser("get-messages", help="Get recent messages")
+    gm.add_argument("--type", choices=["task", "status", "message", "handoff"])
+    gm.add_argument("--status", choices=["pending", "in_progress", "completed"])
+    gm.add_argument("--limit", type=int, default=50)
+
+    # post-task
+    pt = sub.add_parser("post-task", help="Post a task")
+    pt.add_argument("--title", required=True)
+    pt.add_argument("--description", required=True)
+    pt.add_argument("--priority", default="normal", choices=["high", "normal", "low"])
+
+    # post-status
+    ps = sub.add_parser("post-status", help="Post a status update")
+    ps.add_argument("--title", required=True)
+    ps.add_argument("--text", required=True)
+
+    # claim-task
+    ct = sub.add_parser("claim-task", help="Claim a task")
+    ct.add_argument("--task-id", required=True)
+
+    # complete-task
+    cp = sub.add_parser("complete-task", help="Complete a task")
+    cp.add_argument("--task-id", required=True)
+    cp.add_argument("--result", help="JSON result data")
+
+    args = parser.parse_args()
+
+    try:
+        client = M365Collab()
+
+        if args.command == "get-pending-tasks":
+            tasks = client.get_pending_tasks()
+            print(json.dumps({"success": True, "count": len(tasks), "tasks": tasks}, indent=2))
+
+        elif args.command == "get-messages":
+            msgs = client.get_messages(message_type=args.type, status=args.status, limit=args.limit)
+            print(json.dumps({"success": True, "count": len(msgs), "messages": msgs}, indent=2))
+
+        elif args.command == "post-task":
+            msg = client.post_message(args.title, args.description, message_type="task", priority=args.priority)
+            print(json.dumps({"success": True, "task": msg}, indent=2))
+
+        elif args.command == "post-status":
+            msg = client.post_message(args.title, args.text, message_type="status")
+            print(json.dumps({"success": True, "status": msg}, indent=2))
+
+        elif args.command == "claim-task":
+            msg = client.update_status(args.task_id, "in_progress",
+                                       {"claimed_by": f"amplifier-{os.getpid()}"})
+            if msg:
+                print(json.dumps({"success": True, "task": msg}, indent=2))
+            else:
+                print(json.dumps({"success": False, "error": "Task not found"}, indent=2))
+
+        elif args.command == "complete-task":
+            result_data = json.loads(args.result) if args.result else {}
+            msg = client.update_status(args.task_id, "completed",
+                                       {"completed_by": f"amplifier-{os.getpid()}", "result": result_data})
+            if msg:
+                print(json.dumps({"success": True, "task": msg}, indent=2))
+            else:
+                print(json.dumps({"success": False, "error": "Task not found"}, indent=2))
+
+    except Exception as e:
+        print(json.dumps({"success": False, "error": str(e)}, indent=2))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

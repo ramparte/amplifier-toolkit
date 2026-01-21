@@ -1,54 +1,77 @@
 # M365 Agent Collaboration
 
-You have access to the `m365_collab` tool for communicating with other agent sessions.
+Collaborate with other AI agent sessions via M365 SharePoint.
 
-## Overview
+## How to Use
 
-Messages are stored in SharePoint and persist across sessions. Use this for:
-- **Tasks**: Post work for other agents to pick up
-- **Status**: Share progress updates
-- **Handoffs**: Transfer work between sessions
-
-## Quick Reference
-
-| Operation | Use For |
-|-----------|---------|
-| `get_pending_tasks` | Check for tasks from other agents |
-| `claim_task` | Claim a task to work on |
-| `complete_task` | Mark a task as done |
-| `post_task` | Post a task for others |
-| `post_status` | Share a status update |
-| `post_handoff` | Hand off work |
-
-## Examples
-
-**Check for tasks:**
+Use the `m365-collab` CLI via bash. The CLI is at:
 ```
-m365_collab(operation="get_pending_tasks")
+/mnt/c/ANext/amplifier-toolkit/tools/m365-collab/bin/m365-collab
 ```
 
-**Claim and complete a task:**
-```
-m365_collab(operation="claim_task", task_id="msg-xxxxx")
-# ... do the work ...
-m365_collab(operation="complete_task", task_id="msg-xxxxx", result={"status": "done"})
+**Requires `uv run` with dependencies:**
+```bash
+cd /mnt/c/ANext/amplifier-toolkit/tools/m365-collab && uv run --with msal --with httpx python bin/m365-collab <command>
 ```
 
-**Post a new task:**
-```
-m365_collab(operation="post_task", title="Review auth module", description="Check for security issues")
+## Commands
+
+### Check for pending tasks
+```bash
+cd /mnt/c/ANext/amplifier-toolkit/tools/m365-collab && uv run --with msal --with httpx python bin/m365-collab get-pending-tasks
 ```
 
-**Post a status update:**
-```
-m365_collab(operation="post_status", title="Analysis Complete", status_text="Found 3 issues")
+### Post a task for other agents
+```bash
+cd /mnt/c/ANext/amplifier-toolkit/tools/m365-collab && uv run --with msal --with httpx python bin/m365-collab post-task --title "Task title" --description "What needs to be done"
 ```
 
-## Configuration
+### Claim a task
+```bash
+cd /mnt/c/ANext/amplifier-toolkit/tools/m365-collab && uv run --with msal --with httpx python bin/m365-collab claim-task --task-id msg-xxxxx
+```
 
-Requires environment variables (set before starting Amplifier):
+### Complete a task
+```bash
+cd /mnt/c/ANext/amplifier-toolkit/tools/m365-collab && uv run --with msal --with httpx python bin/m365-collab complete-task --task-id msg-xxxxx --result '{"status": "done"}'
+```
+
+### Post a status update
+```bash
+cd /mnt/c/ANext/amplifier-toolkit/tools/m365-collab && uv run --with msal --with httpx python bin/m365-collab post-status --title "Update" --text "Work in progress"
+```
+
+### Get all messages
+```bash
+cd /mnt/c/ANext/amplifier-toolkit/tools/m365-collab && uv run --with msal --with httpx python bin/m365-collab get-messages --limit 20
+```
+
+## Environment Variables Required
+
+These must be set before starting the session:
 - `M365_TENANT_ID` - Azure AD tenant ID
-- `M365_CLIENT_ID` - App registration client ID
+- `M365_CLIENT_ID` - App registration client ID  
 - `M365_CLIENT_SECRET` - App registration secret
 
-If not configured, the tool will return an error explaining what's needed.
+## Output Format
+
+All commands return JSON with `success: true/false` and relevant data.
+
+## Workflow Example
+
+1. **Agent A posts a task:**
+   ```bash
+   post-task --title "Review auth module" --description "Check for security issues"
+   ```
+
+2. **Agent B checks for tasks:**
+   ```bash
+   get-pending-tasks
+   ```
+
+3. **Agent B claims and works on task:**
+   ```bash
+   claim-task --task-id msg-abc123
+   # ... do the work ...
+   complete-task --task-id msg-abc123 --result '{"findings": "No issues found"}'
+   ```
