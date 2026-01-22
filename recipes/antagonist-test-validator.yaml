@@ -1,0 +1,564 @@
+---
+name: "antagonist-test-validator"
+version: "1.0.0"
+description: |
+  Antagonist test validation with TRUE context isolation.
+  
+  This sub-recipe is invoked independently with ZERO inherited context from the parent.
+  It reads test code and implementation from the filesystem and forms completely independent judgments.
+  
+  Purpose: Verify tests are REAL (not stubs) and COMPREHENSIVE (cover edge cases, errors).
+  This validator actively hunts for fake tests, weak assertions, and coverage gaps.
+
+author: "Workflow Engineering Team"
+tags: ["antagonist", "validation", "testing", "quality-assurance"]
+
+# Context inputs - MINIMAL, no test generation discussions from parent
+context:
+  # Directory paths only - validator reads files independently
+  tests_dir: ""
+  requirements_dir: ""
+  design_dir: ""
+  validation_dir: ""
+  implementation_summary_path: ""  # e.g., ".amplifier/implementation-summary.md"
+  
+  # Iteration control
+  max_iterations: 3
+  current_iteration: 0
+
+# No recursion needed for this validator
+recursion:
+  max_depth: 1
+  max_total_steps: 20
+
+stages:
+  - name: "antagonist-test-validation"
+    description: "Critical test review with fresh perspective"
+    
+    steps:
+      # Step 1: Read test artifacts from filesystem (NO inherited context)
+      - id: "read-test-artifacts"
+        agent: "foundation:bug-hunter"
+        prompt: |
+          ## Task: Read Test Artifacts (Fresh Context)
+          
+          You are starting with ZERO prior knowledge of this project's test suite.
+          Read all test artifacts independently and form your own judgment.
+          
+          **Your Task:**
+          Read the following files from the filesystem:
+          
+          1. Requirements & Design:
+             - {{requirements_dir}}/requirements.md (understand what needs testing)
+             - {{design_dir}}/architecture-overview.md (understand system structure)
+             - {{implementation_summary_path}} (what was implemented)
+          
+          2. Test Files:
+             - All test files in {{tests_dir}}/unit/
+             - All test files in {{tests_dir}}/integration/
+             - All test files in {{tests_dir}}/e2e/
+             - {{tests_dir}}/test-report.md (if exists)
+             - {{tests_dir}}/test-summary.json (if exists)
+          
+          Use read_file and glob tools to discover and read test files.
+          
+          After reading, provide a summary:
+          - What features need testing (from requirements)
+          - What test categories exist
+          - Total number of test files found
+          - Initial impression of test quality
+          
+          This is your baseline for critique.
+        output: "baseline_test_understanding"
+        timeout: 900
+      
+      # Step 2: Analyze test realness (stub detection)
+      - id: "analyze-test-realness"
+        agent: "foundation:bug-hunter"
+        prompt: |
+          ## Task: Detect Stub Tests and Weak Assertions
+          
+          **What You Read:**
+          {{baseline_test_understanding}}
+          
+          **Your Mission:**
+          Find tests that LOOK like tests but DON'T ACTUALLY TEST ANYTHING.
+          
+          ### Stub Test Patterns to Detect:
+          
+          1. **Pass-Only Tests** (most common stub)
+          ```python
+          def test_user_creation():
+              create_user("test@example.com")
+              assert True  # BAD: Always passes!
+          ```
+          
+          2. **No Assertions**
+          ```python
+          def test_login():
+              result = login("user", "pass")
+              # No assertions - just calls function
+          ```
+          
+          3. **Weak Assertions**
+          ```python
+          def test_get_users():
+              users = get_users()
+              assert users  # BAD: Only checks truthy, not actual data
+          ```
+          
+          4. **TODO/Skip Tests**
+          ```python
+          @pytest.mark.skip("TODO: implement")
+          def test_important_feature():
+              pass
+          ```
+          
+          5. **Mock-Only Tests** (no real logic tested)
+          ```python
+          def test_payment():
+              mock.return_value = True
+              assert process_payment() == True  # Just testing the mock!
+          ```
+          
+          ### Good Test Examples (for comparison):
+          
+          ```python
+          def test_user_creation_complete():
+              # Arrange
+              email = "test@example.com"
+              password = "SecurePass123!"
+              
+              # Act
+              user = create_user(email, password)
+              
+              # Assert - multiple meaningful assertions
+              assert user is not None
+              assert user.email == email
+              assert user.password_hash != password  # hashed, not plain
+              assert len(user.password_hash) > 20
+              assert user.is_active == True
+              assert user.created_at is not None
+          ```
+          
+          **Your Task:**
+          Read each test file and identify:
+          - Tests with no assertions
+          - Tests with only trivial assertions (assert True, assert 1==1)
+          - Tests that only test mocks, not real logic
+          - Tests marked as skip/todo
+          - Tests with very weak assertions
+          
+          For each problematic test, note:
+          - File path
+          - Test function name
+          - Line number (if possible)
+          - Why it's a stub/weak
+          - What it SHOULD test
+          
+          Use grep tool to find patterns like "assert True", "@pytest.mark.skip", etc.
+          
+          **Output Format (JSON):**
+          ```json
+          {
+            "stub_tests_found": [
+              {
+                "file": "tests/unit/test_auth.py",
+                "test_name": "test_user_creation",
+                "line": 45,
+                "issue": "no-assertions | trivial-assertion | mock-only | skipped | weak-assertion",
+                "description": "Test calls create_user() but has no assertions",
+                "current_code_snippet": "def test_user_creation():\n    create_user('test@example.com')\n    assert True",
+                "why_problematic": "Always passes regardless of whether user creation works",
+                "what_should_test": "Should verify: user object created, email set correctly, password hashed, user is active, user ID assigned"
+              }
+            ],
+            "total_stub_tests": 0,
+            "stub_percentage": 0
+          }
+          ```
+        output: "stub_analysis"
+        timeout: 1800
+      
+      # Step 3: Analyze test coverage gaps
+      - id: "analyze-coverage-gaps"
+        agent: "foundation:bug-hunter"
+        prompt: |
+          ## Task: Identify Coverage Gaps
+          
+          **Baseline Understanding:**
+          {{baseline_test_understanding}}
+          
+          **Stub Analysis:**
+          {{stub_analysis}}
+          
+          **Your Task:**
+          Identify what's NOT being tested (or tested inadequately).
+          
+          ### Coverage Gap Categories:
+          
+          1. **Feature Coverage Gaps**
+             - Requirements that have NO tests
+             - Critical user flows not tested
+             - Features implemented but not tested
+          
+          2. **Edge Case Gaps**
+             - Empty inputs
+             - Null/None values
+             - Boundary values (min/max, zero, negative)
+             - Very long strings
+             - Special characters
+             - Unicode handling
+          
+          3. **Error Path Gaps**
+             - Exception handling not tested
+             - Invalid inputs not tested
+             - Network failures not simulated
+             - Database errors not tested
+             - Timeout scenarios not tested
+          
+          4. **Security Test Gaps**
+             - No authentication bypass tests
+             - No authorization boundary tests
+             - No input validation tests (XSS, SQL injection)
+             - No CSRF protection tests
+             - No rate limiting tests
+          
+          5. **Integration Test Gaps**
+             - API endpoints not tested
+             - Database integration not tested
+             - External service integration not tested
+             - End-to-end flows not tested
+          
+          6. **Performance Test Gaps**
+             - No load tests
+             - No concurrency tests
+             - No response time benchmarks
+          
+          **Analysis Method:**
+          - Compare requirements.md against test files
+          - Look for REQ-XXX IDs mentioned in tests
+          - Check if all API endpoints have tests
+          - Check if all database models have tests
+          - Check if error handlers have tests
+          
+          **Output Format (JSON):**
+          ```json
+          {
+            "coverage_gaps": [
+              {
+                "category": "feature | edge-case | error-path | security | integration | performance",
+                "feature": "feature name or requirement",
+                "req_id": "REQ-XXX (if applicable)",
+                "gap": "specific description of what's missing",
+                "severity": "high | medium | low",
+                "why_important": "explain impact of not testing this",
+                "suggested_tests": [
+                  "test_user_login_with_empty_password",
+                  "test_user_login_with_sql_injection_attempt"
+                ]
+              }
+            ],
+            "requirements_not_tested": [
+              {
+                "req_id": "REQ-XXX",
+                "description": "requirement description",
+                "why_not_tested": "explanation"
+              }
+            ],
+            "total_gaps": 0
+          }
+          ```
+        output: "coverage_gap_analysis"
+        timeout: 1800
+      
+      # Step 4: Analyze test quality issues
+      - id: "analyze-test-quality"
+        agent: "foundation:bug-hunter"
+        prompt: |
+          ## Task: Identify Test Quality Issues
+          
+          **Stub Analysis:**
+          {{stub_analysis}}
+          
+          **Coverage Gap Analysis:**
+          {{coverage_gap_analysis}}
+          
+          **Your Task:**
+          Find tests that are REAL but have QUALITY PROBLEMS.
+          
+          ### Quality Issue Patterns:
+          
+          1. **Flaky Tests**
+             - Tests that depend on timing (sleep statements)
+             - Tests with race conditions
+             - Tests that depend on external state
+             - Tests that assume execution order
+          
+          2. **Brittle Tests**
+             - Tests with hardcoded values that change
+             - Tests that break when unrelated code changes
+             - Tests that depend on specific data in database
+          
+          3. **Setup/Teardown Issues**
+             - No cleanup after tests
+             - Shared state between tests
+             - Database not reset between tests
+             - Mocks not cleared
+          
+          4. **Maintenance Issues**
+             - Duplicate test code
+             - No docstrings explaining what's tested
+             - Poor test naming
+             - Magic numbers without explanation
+          
+          5. **Assertion Issues**
+             - Too few assertions (testing complex behavior with 1 assert)
+             - Too many assertions (should split into multiple tests)
+             - Assertions without messages
+             - Missing negative test cases
+          
+          **Output Format (JSON):**
+          ```json
+          {
+            "quality_issues": [
+              {
+                "file": "...",
+                "test_name": "...",
+                "issue_type": "flaky | brittle | setup-teardown | maintenance | assertion",
+                "description": "specific problem",
+                "impact": "Tests may fail randomly | Tests hard to maintain | etc.",
+                "recommendation": "specific fix"
+              }
+            ],
+            "total_quality_issues": 0
+          }
+          ```
+        output: "quality_issue_analysis"
+        timeout: 1200
+      
+      # Step 5: Generate comprehensive validation report
+      - id: "generate-validation-report"
+        agent: "foundation:bug-hunter"
+        prompt: |
+          ## Task: Generate Antagonist Test Validation Report
+          
+          **All Analysis Results:**
+          - Baseline: {{baseline_test_understanding}}
+          - Stub Analysis: {{stub_analysis}}
+          - Coverage Gaps: {{coverage_gap_analysis}}
+          - Quality Issues: {{quality_issue_analysis}}
+          
+          **Your Task:**
+          Synthesize findings into overall assessment.
+          
+          **Scoring Logic:**
+          - If >30% stub tests → major-issues
+          - If >15% stub tests OR >20 critical coverage gaps → moderate-issues
+          - If >5% stub tests OR >10 critical gaps OR >15 quality issues → minor-issues
+          - Otherwise → acceptable
+          
+          Adjust based on severity and impact.
+          
+          **Output Format (JSON):**
+          ```json
+          {
+            "overall_assessment": "major-issues | moderate-issues | minor-issues | acceptable",
+            "summary": "2-3 sentence executive summary",
+            "metrics": {
+              "total_test_files": 0,
+              "total_tests": 0,
+              "stub_tests": 0,
+              "stub_percentage": 0,
+              "coverage_gaps": 0,
+              "critical_gaps": 0,
+              "quality_issues": 0,
+              "estimated_coverage_percent": 0
+            },
+            "stub_tests_found": "{{stub_analysis.stub_tests_found}}",
+            "coverage_gaps": "{{coverage_gap_analysis.coverage_gaps}}",
+            "quality_issues": "{{quality_issue_analysis.quality_issues}}",
+            "requirements_not_tested": "{{coverage_gap_analysis.requirements_not_tested}}",
+            "total_issues": 0,
+            "recommendation": "major-revision | moderate-revision | minor-revision | acceptable",
+            "iteration_needed": true,
+            "priority_fixes": [
+              "Fix stub tests in test_auth.py",
+              "Add security tests for authentication",
+              "Add error path tests for API endpoints"
+            ]
+          }
+          ```
+        output: "antagonist_test_findings"
+        timeout: 600
+      
+      # Step 6: Document findings
+      - id: "document-test-validation"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Document Test Validation Findings
+          
+          **Antagonist Findings:**
+          {{antagonist_test_findings}}
+          
+          **Your Task:**
+          Create detailed validation report in {{validation_dir}}/antagonist-test-review.md
+          
+          Structure:
+          
+          # Antagonist Test Validation Report
+          
+          **Date:** <current date>
+          **Iteration:** {{current_iteration}} / {{max_iterations}}
+          **Validation Status:** {{antagonist_test_findings.recommendation}}
+          
+          ## Executive Summary
+          {{antagonist_test_findings.summary}}
+          
+          ## Metrics
+          - **Total Test Files:** {{antagonist_test_findings.metrics.total_test_files}}
+          - **Total Tests:** {{antagonist_test_findings.metrics.total_tests}}
+          - **Stub Tests Found:** {{antagonist_test_findings.metrics.stub_tests}} ({{antagonist_test_findings.metrics.stub_percentage}}%)
+          - **Coverage Gaps:** {{antagonist_test_findings.metrics.coverage_gaps}}
+          - **Critical Gaps:** {{antagonist_test_findings.metrics.critical_gaps}}
+          - **Quality Issues:** {{antagonist_test_findings.metrics.quality_issues}}
+          - **Estimated Coverage:** {{antagonist_test_findings.metrics.estimated_coverage_percent}}%
+          
+          ## Overall Assessment
+          **Rating:** {{antagonist_test_findings.overall_assessment}}
+          
+          ## Stub Tests Found (CRITICAL - Must Fix)
+          
+          These tests LOOK like tests but DON'T ACTUALLY TEST ANYTHING:
+          
+          For each stub test:
+          ### {{test_name}} in {{file}}
+          - **Issue Type:** {{issue}}
+          - **Problem:** {{description}}
+          - **Why Problematic:** {{why_problematic}}
+          - **What Should Test:** {{what_should_test}}
+          
+          **Current Code:**
+          ```python
+          {{current_code_snippet}}
+          ```
+          
+          ## Coverage Gaps (HIGH PRIORITY)
+          
+          For each gap by category:
+          ### [Category] {{feature}}
+          - **Requirement:** {{req_id}}
+          - **Severity:** {{severity}}
+          - **Gap:** {{gap}}
+          - **Why Important:** {{why_important}}
+          - **Suggested Tests:**
+            - {{suggested_tests}}
+          
+          ## Quality Issues (Should Fix)
+          
+          For each quality issue:
+          ### {{test_name}} in {{file}}
+          - **Issue Type:** {{issue_type}}
+          - **Problem:** {{description}}
+          - **Impact:** {{impact}}
+          - **Recommendation:** {{recommendation}}
+          
+          ## Requirements Not Tested
+          
+          <list requirements with no test coverage>
+          
+          ## Priority Fixes
+          
+          1. {{priority_fixes[0]}}
+          2. {{priority_fixes[1]}}
+          3. {{priority_fixes[2]}}
+          ...
+          
+          ## Recommendation
+          
+          **Action Required:** {{antagonist_test_findings.recommendation}}
+          
+          **Iteration Needed:** {{antagonist_test_findings.iteration_needed}}
+          
+          ---
+          
+          *This validation was performed with fresh context, independent of test generation discussions.*
+          
+          Use write_file to create this report.
+        output: "report_saved"
+        timeout: 600
+      
+      # Step 7: Check if iteration is needed
+      - id: "check-iteration-needed"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Determine If Test Iteration Required
+          
+          **Antagonist Findings:**
+          {{antagonist_test_findings}}
+          
+          **Current Iteration:** {{current_iteration}}
+          **Max Iterations:** {{max_iterations}}
+          
+          **Decision Logic:**
+          - If recommendation is "acceptable" → No iteration
+          - If stub_percentage > 30% → Iteration needed (major problems)
+          - If critical_gaps > 15 → Iteration needed
+          - If recommendation is "minor-revision" and current_iteration >= 2 → No iteration (good enough)
+          - If current_iteration >= max_iterations → No iteration (limit reached)
+          
+          Return JSON:
+          ```json
+          {
+            "iteration_needed": true/false,
+            "reason": "explanation",
+            "recommendation": "{{antagonist_test_findings.recommendation}}",
+            "total_issues": {{antagonist_test_findings.total_issues}},
+            "stub_count": {{antagonist_test_findings.metrics.stub_tests}},
+            "critical_gaps": {{antagonist_test_findings.metrics.critical_gaps}}
+          }
+          ```
+        output: "iteration_decision"
+        timeout: 120
+
+# Output the validation results to parent recipe
+output:
+  antagonist_test_findings: "{{antagonist_test_findings}}"
+  iteration_decision: "{{iteration_decision}}"
+  report_location: "{{validation_dir}}/antagonist-test-review.md"
+  validation_complete: true
+
+# Metadata
+metadata:
+  context_isolation: "COMPLETE - No inherited context from parent recipe"
+  purpose: "Critical test validation by independent antagonist QA reviewer"
+  
+  key_principles:
+    - "Starts with zero knowledge - reads test code fresh"
+    - "Actively hunts for stub tests and weak assertions"
+    - "Identifies specific coverage gaps with examples"
+    - "Checks test quality (flaky, brittle, maintainable)"
+    - "Independent judgment formation"
+  
+  stub_detection_patterns:
+    - "assert True (always passes)"
+    - "assert 1 == 1 (tautology)"
+    - "pass statements only"
+    - "@pytest.mark.skip"
+    - "TODO comments"
+    - "Mock-only tests (no real logic)"
+    - "Tests with no assertions"
+  
+  usage_from_parent:
+    example: |
+      - id: "antagonist-test-review"
+        recipe: "antagonist-test-validator.yaml"
+        context:
+          tests_dir: "{{tests_dir}}"
+          requirements_dir: "{{requirements_dir}}"
+          design_dir: "{{design_dir}}"
+          validation_dir: "{{validation_dir}}"
+          implementation_summary_path: "{{state_dir}}/implementation-summary.md"
+          max_iterations: 3
+          current_iteration: 0
+        output: "antagonist_test_validation_result"

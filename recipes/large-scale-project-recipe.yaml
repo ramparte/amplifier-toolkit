@@ -1,0 +1,1704 @@
+---
+name: "large-scale-project-development"
+version: "1.0.0"
+description: |
+  Orchestrates design, implementation, and validation for very large projects.
+  Based on observed workflow patterns from multi-month project sessions.
+  
+  Supports projects like: web app clones (Word, Figma, etc), large backend systems,
+  complex multi-service architectures, enterprise applications.
+  
+  Key features:
+  - Iterative requirements gathering from minimal input
+  - Parallel design generation (4-6 domains simultaneously)
+  - True antagonist validation with fresh context (not yes-man)
+  - Context-managed implementation with shadow environments
+  - Comprehensive testing with antagonist validation
+  - 3 critical approval gates for human oversight
+  - Automatic modularization (dozens to hundreds of files)
+  - Resumable after interruption (hours/days of runtime)
+  
+  Expected runtime: Hours to days, depending on project scale.
+  
+  Usage:
+    amplifier recipe execute large-scale-project-recipe.yaml
+
+author: "Workflow Engineering Team"
+tags: ["large-scale", "staged", "parallel", "antagonist", "design", "implementation", "testing"]
+
+# Context Variables
+# These persist across resumption and track state
+context:
+  # Project basics (user provides or iteratively gathered)
+  project_name: ""
+  project_description: ""
+  
+  # Working directory structure
+  project_root: "."
+  state_dir: ".amplifier"
+  requirements_dir: ".amplifier/requirements"
+  design_dir: ".amplifier/design"
+  tasks_dir: ".amplifier/tasks"
+  tests_dir: ".amplifier/tests"
+  validation_dir: ".amplifier/validation"
+  
+  # Shadow environment config
+  shadow_env_enabled: true
+  shadow_env_name: "project-dev-shadow"
+  
+  # Progress tracking (populated during execution)
+  requirements_complete: false
+  design_domains: []
+  design_complete: false
+  implementation_tasks: []
+  implementation_complete: false
+  tests_complete: false
+  
+  # Iteration limits
+  max_design_iterations: 5
+  max_test_iterations: 3
+  current_design_iteration: 0
+  current_test_iteration: 0
+
+# Recursion config for sub-recipe invocations
+recursion:
+  max_depth: 4
+  max_total_steps: 500
+
+# =============================================================================
+# STAGE 1: REQUIREMENTS GATHERING
+# No approval needed - gathering information
+# =============================================================================
+stages:
+  - name: "requirements-gathering"
+    description: "Iteratively gather and structure project requirements"
+    
+    steps:
+      # Step 1: Initial project interrogation
+      - id: "initial-interrogation"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Initial Project Requirements Gathering
+          
+          You are helping to scope a large-scale software development project.
+          
+          **Current Information:**
+          - Project Name: {{project_name}}
+          - Project Description: {{project_description}}
+          
+          **Your Task:**
+          If the description is minimal or unclear, generate a comprehensive list of
+          questions to ask the user. Cover:
+          
+          1. **Project Vision & Goals**
+             - What problem does this solve?
+             - Who are the users?
+             - Success criteria?
+          
+          2. **Scope & Features**
+             - Core features (must-have)
+             - Secondary features (nice-to-have)
+             - Explicitly out of scope
+          
+          3. **Technical Constraints**
+             - Platform (web, mobile, desktop, API)
+             - Technology preferences
+             - Performance requirements
+             - Scalability needs
+          
+          4. **Non-Functional Requirements**
+             - Security requirements
+             - Accessibility requirements
+             - Internationalization
+             - Compliance (GDPR, HIPAA, etc.)
+          
+          5. **Integration & Dependencies**
+             - External services to integrate
+             - Data sources
+             - Authentication providers
+          
+          6. **Timeline & Resources**
+             - Deadline constraints
+             - Team size/composition
+             - Budget constraints
+          
+          If the initial description is comprehensive, extract and structure this information.
+          
+          **Output Format:**
+          ```json
+          {
+            "clarity_assessment": "minimal | partial | comprehensive",
+            "questions_for_user": [...],
+            "initial_understanding": {
+              "vision": "...",
+              "core_features": [...],
+              "constraints": {...}
+            }
+          }
+          ```
+        output: "initial_requirements"
+        timeout: 600
+      
+      # Step 2: Requirements elaboration with domain-specific sub-agents
+      # This step would ideally pause for user input in a real implementation
+      # For now, it assumes we have enough info or uses defaults
+      - id: "elaborate-requirements"
+        agent: "foundation:zen-architect"
+        mode: "ARCHITECT"
+        prompt: |
+          ## Task: Elaborate and Structure Requirements
+          
+          **Initial Requirements Analysis:**
+          {{initial_requirements}}
+          
+          **Original Input:**
+          - Project: {{project_name}}
+          - Description: {{project_description}}
+          
+          **Your Task:**
+          Create a comprehensive, structured requirements document that includes:
+          
+          ### 1. Executive Summary
+          - Project name, vision, objectives
+          - Target users and use cases
+          - Success metrics
+          
+          ### 2. Functional Requirements
+          Break into categories (e.g., Auth, UI, Data, API, Admin)
+          For each requirement:
+          - ID (REQ-001, REQ-002, etc.)
+          - Priority (Critical, High, Medium, Low)
+          - Description
+          - Acceptance criteria
+          
+          ### 3. Non-Functional Requirements
+          - Performance (response time, throughput)
+          - Security (authentication, authorization, data protection)
+          - Scalability (concurrent users, data volume)
+          - Reliability (uptime, error handling)
+          - Accessibility (WCAG compliance)
+          - Usability (UX principles)
+          
+          ### 4. Technical Constraints
+          - Platform and technology stack
+          - Browser/device support
+          - Integration requirements
+          - Compliance requirements
+          
+          ### 5. Out of Scope
+          - Explicitly list what's NOT included
+          
+          ### 6. Assumptions and Dependencies
+          - External dependencies
+          - Assumptions about user environment
+          - Third-party service assumptions
+          
+          Save this to a structured JSON format for downstream processing,
+          and also generate a human-readable markdown document.
+          
+          **Output Format:**
+          Return both JSON and Markdown in your response.
+        output: "structured_requirements"
+        timeout: 900
+      
+      # Step 3: Save requirements to files
+      - id: "save-requirements"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Save Requirements Documentation
+          
+          **Structured Requirements:**
+          {{structured_requirements}}
+          
+          **Your Task:**
+          Create the following files in {{requirements_dir}}/:
+          
+          1. `requirements.md` - Human-readable requirements document
+          2. `requirements.json` - Machine-readable structured requirements
+          3. `requirements-summary.txt` - One-page executive summary
+          
+          Use write_file tool to create each file.
+          Ensure directories exist (create if needed).
+          
+          Report back with file paths created and brief summary.
+        output: "requirements_files"
+        timeout: 300
+
+# =============================================================================
+# STAGE 2: DESIGN GENERATION
+# No approval needed yet - generating design for review
+# =============================================================================
+  - name: "design-generation"
+    description: "Generate comprehensive design specifications using parallel sub-agents"
+    
+    steps:
+      # Step 1: Identify design domains based on requirements
+      - id: "identify-design-domains"
+        agent: "foundation:zen-architect"
+        mode: "ARCHITECT"
+        prompt: |
+          ## Task: Identify Design Domains
+          
+          **Requirements:**
+          {{structured_requirements}}
+          
+          **Your Task:**
+          Analyze the requirements and identify the major design domains that need
+          detailed specifications. Common domains include:
+          
+          - Architecture (system architecture, component design, deployment)
+          - Data Model (database schema, data flow, data validation)
+          - API Design (endpoints, contracts, versioning)
+          - UI/UX (user flows, wireframes, component library)
+          - Security (authentication, authorization, encryption, threat model)
+          - Performance (caching strategy, optimization, monitoring)
+          - Infrastructure (deployment, CI/CD, scaling, monitoring)
+          - Testing Strategy (unit, integration, e2e, performance testing)
+          - Error Handling (error taxonomy, logging, monitoring)
+          - Accessibility (WCAG compliance, keyboard nav, screen readers)
+          
+          Based on the project requirements, determine which domains are critical
+          and need full design specs vs which are minor and can be brief.
+          
+          Prioritize domains for parallel design generation (top 6-8 critical domains).
+          
+          **Output Format:**
+          ```json
+          {
+            "critical_domains": [
+              {"name": "architecture", "priority": 1, "complexity": "high"},
+              {"name": "data-model", "priority": 2, "complexity": "high"},
+              ...
+            ],
+            "secondary_domains": [...],
+            "domain_dependencies": {
+              "api-design": ["data-model", "architecture"],
+              ...
+            }
+          }
+          ```
+        output: "design_domains_list"
+        timeout: 600
+      
+      # Step 2: Parallel design generation for critical domains
+      # Uses foreach with parallel execution
+      - id: "generate-domain-designs"
+        agent: "foundation:zen-architect"
+        mode: "ARCHITECT"
+        prompt: |
+          ## Task: Generate Design Specification for {{domain.name}}
+          
+          **Requirements:**
+          {{structured_requirements}}
+          
+          **Domain Focus:** {{domain.name}}
+          **Priority:** {{domain.priority}}
+          **Complexity:** {{domain.complexity}}
+          
+          **Other Domains (for reference):**
+          {{design_domains_list}}
+          
+          **Your Task:**
+          Create a comprehensive design specification for the {{domain.name}} domain.
+          
+          Structure your design document with:
+          
+          ### 1. Overview
+          - Purpose of this domain
+          - Key responsibilities
+          - Integration points with other domains
+          
+          ### 2. Detailed Design
+          - Architecture diagrams (describe in text, use ASCII art if helpful)
+          - Component breakdown
+          - Data structures / interfaces / contracts
+          - Key algorithms or logic flows
+          
+          ### 3. Technical Decisions
+          - Technology choices with rationale
+          - Trade-offs considered
+          - Design patterns used
+          
+          ### 4. Implementation Considerations
+          - Complexity estimates
+          - Dependencies (external libraries, other domains)
+          - Potential risks
+          
+          ### 5. Testing Strategy
+          - What needs testing
+          - Test scenarios
+          - Validation criteria
+          
+          ### 6. Future Extensibility
+          - How this design supports future features
+          - Migration paths for changes
+          
+          Be thorough and detailed. This will be used for implementation.
+          Output as Markdown formatted for a design document.
+        foreach: "{{design_domains_list.critical_domains}}"
+        as: "domain"
+        parallel: true  # Run 4-6 domains simultaneously
+        collect: "domain_designs"
+        timeout: 1800  # 30 minutes per domain
+      
+      # Step 3: Design synthesis and consistency check
+      - id: "synthesize-design"
+        agent: "foundation:zen-architect"
+        mode: "ARCHITECT"
+        prompt: |
+          ## Task: Synthesize and Validate Design Consistency
+          
+          **Requirements:**
+          {{structured_requirements}}
+          
+          **Domain Designs:**
+          {{domain_designs}}
+          
+          **Your Task:**
+          Review all domain designs for:
+          
+          1. **Consistency**
+             - Do data models align across domains?
+             - Are API contracts consistent with data model?
+             - Does UI design match API capabilities?
+             - Are security measures consistent across domains?
+          
+          2. **Completeness**
+             - Do designs cover all functional requirements?
+             - Are non-functional requirements addressed?
+             - Are integration points clearly defined?
+          
+          3. **Conflicts & Gaps**
+             - Any contradictions between domains?
+             - Missing specifications?
+             - Ambiguous interfaces?
+          
+          4. **Architecture Overview**
+             - High-level system architecture
+             - How all domains fit together
+             - Data flow across domains
+             - Deployment architecture
+          
+          Generate:
+          - `architecture-overview.md` - High-level architecture document
+          - `design-consistency-report.md` - Consistency validation report
+          - `integration-map.md` - How domains integrate
+          
+          Return the content for these documents.
+        output: "design_synthesis"
+        timeout: 1200
+      
+      # Step 4: Save all design documents to files
+      - id: "save-design-documents"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Save All Design Documents
+          
+          **Design Domains:**
+          {{design_domains_list}}
+          
+          **Domain Designs:**
+          {{domain_designs}}
+          
+          **Design Synthesis:**
+          {{design_synthesis}}
+          
+          **Your Task:**
+          Create comprehensive design documentation in {{design_dir}}/.
+          
+          For each domain design, create a file:
+          - `{{design_dir}}/{{domain-name}}-design.md`
+          
+          Also create synthesis documents:
+          - `{{design_dir}}/architecture-overview.md`
+          - `{{design_dir}}/design-consistency-report.md`
+          - `{{design_dir}}/integration-map.md`
+          - `{{design_dir}}/design-summary.md` (executive summary of all designs)
+          
+          Use write_file tool to create each file.
+          
+          Return a summary of files created and total design document size.
+        output: "design_files_created"
+        timeout: 600
+
+# =============================================================================
+# STAGE 3: DESIGN VALIDATION (CRITICAL APPROVAL GATE #1)
+# =============================================================================
+  - name: "design-validation"
+    description: "Antagonist validation with fresh context, then user approval"
+    
+    # First approval: User reviews design summary before antagonist validation
+    approval:
+      required: true
+      prompt: |
+        # Design Generation Complete
+        
+        The design phase has generated comprehensive specifications across multiple domains.
+        
+        ## Design Summary
+        {{design_synthesis}}
+        
+        ## Files Created
+        {{design_files_created}}
+        
+        ## What Happens Next
+        If you approve, an antagonist validation session will be spawned with FRESH context
+        to critically review the design. This antagonist will:
+        - Look for gaps, inconsistencies, and flaws
+        - Challenge assumptions
+        - Identify risks
+        - Be genuinely critical (not a yes-man)
+        
+        The design may iterate up to {{max_design_iterations}} times based on antagonist findings.
+        
+        **Approve** to proceed with antagonist validation.
+        **Deny** to stop and review designs manually first.
+    
+    steps:
+      # Step 1: Antagonist design review via isolated sub-recipe
+      # This sub-recipe has TRUE context isolation - no inherited context
+      - id: "antagonist-design-review"
+        recipe: "antagonist-design-validator.yaml"
+        context:
+          design_dir: "{{design_dir}}"
+          requirements_dir: "{{requirements_dir}}"
+          validation_dir: "{{validation_dir}}"
+          max_iterations: "{{max_design_iterations}}"
+          current_iteration: "{{current_design_iteration}}"
+        output: "antagonist_validation_result"
+        timeout: 3600
+      
+      # Step 2: Extract antagonist findings from sub-recipe result
+      - id: "extract-antagonist-findings"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Extract Antagonist Findings
+          
+          **Sub-Recipe Result:**
+          {{antagonist_validation_result}}
+          
+          Extract the antagonist_findings and iteration_decision for use in iteration logic.
+          
+          Return JSON with the key information extracted.
+        output: "antagonist_report"
+        timeout: 60
+      
+      # Step 3: Iterate design based on antagonist findings (if needed)
+      - id: "iterate-design-fixes"
+        condition: "{{antagonist_validation_result.iteration_decision.iteration_needed}} == true"
+        agent: "foundation:zen-architect"
+        mode: "ARCHITECT"
+        prompt: |
+          ## Task: Fix Design Issues Identified by Antagonist
+          
+          **Antagonist Report:**
+          {{antagonist_validation_result.antagonist_findings}}
+          
+          **Current Iteration:** {{current_design_iteration}} / {{max_design_iterations}}
+          
+          **Your Task:**
+          Address each issue identified by the antagonist review:
+          
+          1. For each critical gap:
+             - Read the affected design file from {{design_dir}}/
+             - Update the design to address the issue
+             - Write the updated file back
+          
+          2. For moderate issues:
+             - Prioritize by impact
+             - Address as many as possible within scope
+          
+          3. Update affected integration points
+          
+          4. Generate an iteration report:
+             - What was fixed
+             - What remains (if any)
+             - Changes summary
+          
+          Use read_file and edit_file to update design documents.
+          
+          **Output:**
+          Iteration report with changes made and remaining issues.
+        output: "design_iteration_report"
+        timeout: 1800
+      
+      # Step 4: Re-run antagonist validation if we iterated
+      - id: "rerun-antagonist-validation"
+        condition: "{{antagonist_validation_result.iteration_decision.iteration_needed}} == true"
+        recipe: "antagonist-design-validator.yaml"
+        context:
+          design_dir: "{{design_dir}}"
+          requirements_dir: "{{requirements_dir}}"
+          validation_dir: "{{validation_dir}}"
+          max_iterations: "{{max_design_iterations}}"
+          current_iteration: "{{current_design_iteration + 1}}"
+        output: "final_antagonist_validation"
+        timeout: 3600
+      
+      # Step 5: Consolidate validation results
+      - id: "consolidate-validation-results"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Consolidate Design Validation Results
+          
+          **Initial Validation:**
+          {{antagonist_validation_result}}
+          
+          **Iteration Report (if any):**
+          {{design_iteration_report}}
+          
+          **Final Validation (if re-run):**
+          {{final_antagonist_validation}}
+          
+          Create consolidated summary:
+          - Initial findings
+          - Fixes applied
+          - Final status
+          - Recommendation
+          
+          Save to {{validation_dir}}/design-validation-summary.md
+        output: "validation_report_files"
+        timeout: 300
+    
+    # Second approval: User must approve design before implementation
+    approval:
+      required: true
+      prompt: |
+        # Design Validation Complete - Approval Required
+        
+        The design has been reviewed by an antagonist validator and iterated based on findings.
+        
+        ## Antagonist Review Summary
+        {{antagonist_validation_result.antagonist_findings}}
+        
+        ## Iteration History
+        {{design_iteration_report}}
+        
+        ## Final Validation
+        {{final_antagonist_validation}}
+        
+        ## Validation Reports
+        {{validation_report_files}}
+        
+        **Review the validation reports in {{validation_dir}}/ before approving.**
+        
+        **Approve** to proceed with implementation.
+        **Deny** to stop and make manual design changes.
+        
+        ⚠️  Implementation will begin after approval - this is the last checkpoint before coding.
+
+# =============================================================================
+# STAGE 4: IMPLEMENTATION PLANNING
+# No approval needed - just planning tasks
+# =============================================================================
+  - name: "implementation-planning"
+    description: "Break design into implementation tasks with dependencies"
+    
+    steps:
+      # Step 1: Generate implementation task breakdown
+      - id: "generate-task-breakdown"
+        agent: "foundation:zen-architect"
+        mode: "ARCHITECT"
+        prompt: |
+          ## Task: Generate Implementation Task Breakdown
+          
+          **Validated Design:**
+          Read all design files from {{design_dir}}/.
+          
+          **Your Task:**
+          Break the design into concrete, actionable implementation tasks.
+          
+          ### Task Structure:
+          Each task should be:
+          - **Bounded**: 4-8 hours of work
+          - **Testable**: Clear success criteria
+          - **Isolated**: Minimal dependencies
+          
+          ### Task Categories:
+          1. **Foundation** (Priority 1)
+             - Database setup and migrations
+             - Core data models
+             - Authentication/authorization framework
+             - Base API structure
+          
+          2. **Core Features** (Priority 2)
+             - Main functional components
+             - API endpoints
+             - Business logic
+          
+          3. **UI/UX** (Priority 3)
+             - UI components
+             - User flows
+             - Client-side logic
+          
+          4. **Integration** (Priority 4)
+             - External service integration
+             - Cross-component integration
+             - End-to-end flows
+          
+          5. **Polish** (Priority 5)
+             - Error handling
+             - Logging and monitoring
+             - Performance optimization
+             - Documentation
+          
+          ### For Each Task:
+          ```json
+          {
+            "id": "TASK-001",
+            "title": "Setup database schema",
+            "category": "foundation",
+            "priority": 1,
+            "description": "...",
+            "design_reference": ["data-model-design.md", "architecture-overview.md"],
+            "dependencies": [],
+            "estimated_hours": 4,
+            "acceptance_criteria": [...],
+            "test_requirements": [...],
+            "files_to_create": [...],
+            "files_to_modify": [...]
+          }
+          ```
+          
+          Generate comprehensive task list (50-200 tasks for large projects).
+          Ensure dependencies are correctly identified.
+          
+          Output as JSON array of tasks.
+        output: "implementation_tasks"
+        timeout: 1800
+      
+      # Step 2: Organize and prioritize tasks
+      - id: "organize-tasks"
+        agent: "foundation:zen-architect"
+        mode: "ARCHITECT"
+        prompt: |
+          ## Task: Organize and Prioritize Implementation Tasks
+          
+          **Task List:**
+          {{implementation_tasks}}
+          
+          **Your Task:**
+          1. Validate dependency graph (no cycles)
+          2. Group tasks by:
+             - Can be done in parallel (no shared dependencies)
+             - Must be sequential (dependencies)
+             - Critical path (longest dependent chain)
+          
+          3. Create execution phases:
+             - Phase 1: Foundation (must complete first)
+             - Phase 2-N: Feature development (parallel where possible)
+             - Final Phase: Integration and polish
+          
+          4. Identify tasks suitable for parallel execution
+          
+          **Output Format:**
+          ```json
+          {
+            "execution_phases": [
+              {
+                "phase": 1,
+                "name": "Foundation",
+                "tasks": ["TASK-001", "TASK-002", ...],
+                "parallel_groups": [
+                  {"group": 1, "tasks": ["TASK-001", "TASK-003"]},
+                  ...
+                ]
+              }
+            ],
+            "critical_path": ["TASK-001", "TASK-005", ...],
+            "estimated_total_hours": 500,
+            "parallel_execution_estimate_hours": 200
+          }
+          ```
+        output: "task_organization"
+        timeout: 600
+      
+      # Step 3: Create task tracking files
+      - id: "create-task-files"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Create Task Tracking Files
+          
+          **Implementation Tasks:**
+          {{implementation_tasks}}
+          
+          **Task Organization:**
+          {{task_organization}}
+          
+          **Your Task:**
+          Create task files in {{tasks_dir}}/:
+          
+          1. For each task, create: `{{tasks_dir}}/TASK-XXX-description.md`
+             Include: title, description, dependencies, acceptance criteria, design references
+          
+          2. Create master task list: `{{tasks_dir}}/task-manifest.json`
+             Include full task array with metadata
+          
+          3. Create execution plan: `{{tasks_dir}}/execution-plan.md`
+             Include phases, critical path, parallel groups
+          
+          4. Create progress tracker: `{{tasks_dir}}/progress.json`
+             Initialize with all tasks as "pending"
+          
+          Use write_file to create these files.
+          
+          Report files created and summary.
+        output: "task_files_created"
+        timeout: 900
+
+# =============================================================================
+# STAGE 5: IMPLEMENTATION EXECUTION (APPROVAL GATE #2)
+# =============================================================================
+  - name: "implementation-execution"
+    description: "Execute implementation tasks with shadow environment testing"
+    
+    steps:
+      # Step 1: Execute Phase 1 (Foundation) tasks sequentially
+      - id: "execute-foundation-phase"
+        agent: "foundation:zen-architect"
+        prompt: |
+          ## Task: Execute Foundation Phase Implementation
+          
+          **Task Organization:**
+          {{task_organization}}
+          
+          **Tasks to Execute:**
+          Read {{tasks_dir}}/execution-plan.md and identify Phase 1 (Foundation) tasks.
+          
+          For each foundation task:
+          1. Read the task file: {{tasks_dir}}/TASK-XXX-*.md
+          2. Read relevant design documents from {{design_dir}}/
+          3. Implement the task:
+             - Create required files
+             - Write code following design specifications
+             - Add inline documentation
+          4. Update progress tracker
+          
+          **Shadow Environment:**
+          If {{shadow_env_enabled}}, create shadow environment: {{shadow_env_name}}
+          Test implementation in isolation.
+          
+          Focus on correctness over speed.
+          Report any design ambiguities or blockers.
+          
+          **Output:**
+          Summary of foundation tasks completed, files created, any issues encountered.
+        output: "foundation_implementation_report"
+        timeout: 7200  # 2 hours for foundation
+      
+      # Step 2: Execute remaining phases with parallel execution where possible
+      # In a real implementation, this would use foreach with parallel groups
+      - id: "execute-feature-phases"
+        agent: "foundation:zen-architect"
+        prompt: |
+          ## Task: Execute Feature Development Phases
+          
+          **Foundation Complete:**
+          {{foundation_implementation_report}}
+          
+          **Remaining Phases:**
+          {{task_organization}}
+          
+          For each phase 2-N:
+          1. Identify parallel groups
+          2. For tasks that can run in parallel:
+             - Execute simultaneously (simulate with batch processing)
+          3. For sequential tasks:
+             - Execute in dependency order
+          
+          For each task:
+          - Read task file and design references
+          - Implement according to spec
+          - Test in shadow environment
+          - Update progress tracker
+          
+          **Focus Areas:**
+          - Feature completeness
+          - API contract adherence
+          - Error handling
+          - Unit test coverage
+          
+          Report progress after each phase.
+          Flag any blockers or design issues.
+        output: "feature_implementation_report"
+        timeout: 14400  # 4 hours for features (could be much longer in reality)
+      
+      # Step 3: Integration and validation
+      - id: "integration-validation"
+        agent: "foundation:zen-architect"
+        prompt: |
+          ## Task: Integration Validation
+          
+          **Foundation Report:**
+          {{foundation_implementation_report}}
+          
+          **Feature Report:**
+          {{feature_implementation_report}}
+          
+          **Your Task:**
+          1. Validate integration points:
+             - API contracts working correctly
+             - Data flow between components
+             - Authentication/authorization working
+             - UI connected to backend
+          
+          2. Run smoke tests in shadow environment
+          
+          3. Check implementation against design:
+             - Read {{design_dir}}/integration-map.md
+             - Verify all integration points implemented
+          
+          4. Generate implementation validation report:
+             - What works
+             - What's incomplete
+             - What needs fixes
+             - Technical debt introduced
+          
+          Be honest about gaps and issues.
+        output: "integration_validation_report"
+        timeout: 3600
+      
+      # Step 4: Update project state
+      - id: "update-implementation-state"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Update Project State
+          
+          **Reports:**
+          - Foundation: {{foundation_implementation_report}}
+          - Features: {{feature_implementation_report}}
+          - Integration: {{integration_validation_report}}
+          
+          Update files:
+          - {{tasks_dir}}/progress.json (mark completed tasks)
+          - {{state_dir}}/implementation-summary.md
+          - {{state_dir}}/project-state.json (set implementation_complete: true)
+          
+          Use write_file to update.
+          
+          Generate summary of implementation:
+          - Total tasks completed
+          - Files created
+          - Lines of code written
+          - Known issues
+        output: "implementation_summary"
+        timeout: 300
+    
+    # Approval gate: User reviews implementation before testing
+    approval:
+      required: true
+      prompt: |
+        # Implementation Complete - Approval Required
+        
+        The implementation phase has completed all planned tasks.
+        
+        ## Implementation Summary
+        {{implementation_summary}}
+        
+        ## Foundation Phase
+        {{foundation_implementation_report}}
+        
+        ## Feature Development
+        {{feature_implementation_report}}
+        
+        ## Integration Validation
+        {{integration_validation_report}}
+        
+        **Review the implementation before proceeding to testing.**
+        
+        You can:
+        - Review code in the working directory
+        - Check {{tasks_dir}}/progress.json for task completion
+        - Read {{state_dir}}/implementation-summary.md
+        
+        **Approve** to proceed with test generation and execution.
+        **Deny** to stop and review/fix implementation issues.
+
+# =============================================================================
+# STAGE 6: TESTING GENERATION & EXECUTION
+# No approval needed - generating and running tests
+# =============================================================================
+  - name: "testing-generation-execution"
+    description: "Generate comprehensive tests and execute in shadow environment"
+    
+    steps:
+      # Step 1: Generate test plan
+      - id: "generate-test-plan"
+        agent: "foundation:bug-hunter"
+        prompt: |
+          ## Task: Generate Comprehensive Test Plan
+          
+          **Design Documents:**
+          Read from {{design_dir}}/:
+          - architecture-overview.md
+          - All domain design files (especially testing-strategy-design.md if exists)
+          
+          **Implementation:**
+          Read {{state_dir}}/implementation-summary.md
+          
+          **Your Task:**
+          Create a comprehensive test plan covering:
+          
+          ### 1. Unit Tests
+          - For each module/component
+          - Focus on business logic, edge cases, error handling
+          - Target: 80%+ code coverage
+          
+          ### 2. Integration Tests
+          - API endpoint tests (all routes, methods, status codes)
+          - Database integration tests
+          - External service integration tests (with mocks)
+          - Authentication/authorization flows
+          
+          ### 3. End-to-End Tests
+          - Critical user journeys
+          - Happy path scenarios
+          - Error scenarios
+          
+          ### 4. Performance Tests
+          - Load testing (concurrent users)
+          - Response time benchmarks
+          - Database query performance
+          
+          ### 5. Security Tests
+          - Authentication bypass attempts
+          - Authorization boundary tests
+          - Input validation tests (XSS, SQL injection, etc.)
+          - CSRF protection tests
+          
+          ### 6. Accessibility Tests
+          - Keyboard navigation
+          - Screen reader compatibility
+          - WCAG compliance
+          
+          **For Each Test:**
+          ```json
+          {
+            "test_id": "TEST-001",
+            "category": "unit | integration | e2e | performance | security | accessibility",
+            "target": "component or feature",
+            "description": "what is being tested",
+            "priority": "critical | high | medium | low",
+            "test_cases": [
+              {
+                "case_id": "TC-001",
+                "description": "...",
+                "preconditions": "...",
+                "steps": [...],
+                "expected_result": "...",
+                "assertions": [...]
+              }
+            ]
+          }
+          ```
+          
+          Generate comprehensive test plan (100-500 test cases for large projects).
+        output: "test_plan"
+        timeout: 1800
+      
+      # Step 2: Generate test implementations
+      - id: "generate-test-code"
+        agent: "foundation:bug-hunter"
+        prompt: |
+          ## Task: Generate Test Implementations
+          
+          **Test Plan:**
+          {{test_plan}}
+          
+          **Implementation Files:**
+          Review implemented code structure.
+          
+          **Your Task:**
+          Generate actual test code (not stubs!) for all tests in the plan.
+          
+          ### Test Framework
+          Use appropriate framework for the tech stack:
+          - Python: pytest
+          - JavaScript: Jest/Vitest
+          - Java: JUnit
+          - etc.
+          
+          ### Test Structure
+          ```python
+          # Example for Python/pytest
+          
+          def test_user_authentication_success():
+              \"\"\"TC-001: User can authenticate with valid credentials\"\"\"
+              # Arrange
+              user = create_test_user(email="test@example.com", password="ValidPass123!")
+              
+              # Act
+              response = auth_service.authenticate(email="test@example.com", password="ValidPass123!")
+              
+              # Assert
+              assert response.success == True
+              assert response.token is not None
+              assert response.user.email == "test@example.com"
+          
+          def test_user_authentication_invalid_password():
+              \"\"\"TC-002: Authentication fails with invalid password\"\"\"
+              user = create_test_user(email="test@example.com", password="ValidPass123!")
+              
+              response = auth_service.authenticate(email="test@example.com", password="WrongPass!")
+              
+              assert response.success == False
+              assert response.error == "INVALID_CREDENTIALS"
+              assert response.token is None
+          ```
+          
+          **Requirements:**
+          - Real assertions (not just pass statements)
+          - Proper test data setup and teardown
+          - Mock external dependencies
+          - Cover edge cases and error paths
+          - Include descriptive docstrings
+          
+          Generate test files:
+          - Unit tests: {{tests_dir}}/unit/test_*.py
+          - Integration tests: {{tests_dir}}/integration/test_*.py
+          - E2E tests: {{tests_dir}}/e2e/test_*.py
+          
+          Use write_file to create test files.
+          
+          Report test files created and coverage estimate.
+        output: "test_code_generated"
+        timeout: 3600
+      
+      # Step 3: Execute tests in shadow environment
+      - id: "execute-tests"
+        agent: "foundation:bug-hunter"
+        prompt: |
+          ## Task: Execute Tests in Shadow Environment
+          
+          **Test Files:**
+          {{test_code_generated}}
+          
+          **Shadow Environment:** {{shadow_env_name}}
+          
+          **Your Task:**
+          1. Setup shadow environment (if not already setup)
+          2. Run unit tests first
+          3. Run integration tests
+          4. Run e2e tests
+          5. Run performance tests (if applicable)
+          6. Run security tests
+          
+          Use bash tool to execute tests:
+          ```bash
+          # Example
+          pytest {{tests_dir}}/unit/ -v --cov --cov-report=term
+          pytest {{tests_dir}}/integration/ -v
+          pytest {{tests_dir}}/e2e/ -v
+          ```
+          
+          **Collect Results:**
+          - Total tests run
+          - Passed / failed / skipped
+          - Code coverage percentage
+          - Performance benchmark results
+          - Any test failures with details
+          
+          If tests fail:
+          - Analyze failures
+          - Determine if issue is in test code or implementation
+          - Provide specific diagnosis
+          
+          **Output:**
+          Test execution report with results, coverage, and failure analysis.
+        output: "test_execution_report"
+        timeout: 3600
+      
+      # Step 4: Fix failing tests or implementation
+      - id: "fix-test-failures"
+        condition: "{{test_execution_report}} contains 'FAILED'"
+        agent: "foundation:bug-hunter"
+        prompt: |
+          ## Task: Fix Test Failures
+          
+          **Test Execution Report:**
+          {{test_execution_report}}
+          
+          **Your Task:**
+          For each failing test:
+          1. Read the test code
+          2. Read the implementation code being tested
+          3. Determine root cause:
+             - Bug in implementation?
+             - Bug in test?
+             - Design ambiguity?
+          
+          4. Fix the issue:
+             - If implementation bug: Fix the code
+             - If test bug: Fix the test
+             - If design ambiguity: Document and make reasonable choice
+          
+          5. Re-run tests to verify fix
+          
+          Continue until all critical and high priority tests pass.
+          
+          **Output:**
+          Report of fixes made and re-test results.
+        output: "test_fix_report"
+        timeout: 3600
+      
+      # Step 5: Generate test report
+      - id: "generate-test-report"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Generate Test Report
+          
+          **Test Plan:**
+          {{test_plan}}
+          
+          **Test Execution:**
+          {{test_execution_report}}
+          
+          **Fixes Applied:**
+          {{test_fix_report}}
+          
+          Create test report files:
+          - {{tests_dir}}/test-report.md (comprehensive report)
+          - {{tests_dir}}/test-summary.json (machine-readable summary)
+          - {{tests_dir}}/coverage-report.md (coverage analysis)
+          
+          Include:
+          - Total test count by category
+          - Pass/fail statistics
+          - Code coverage percentage
+          - Known issues or gaps
+          - Recommendations for additional testing
+          
+          Use write_file to create these files.
+        output: "test_report_files"
+        timeout: 300
+
+# =============================================================================
+# STAGE 7: TESTING VALIDATION (APPROVAL GATE #3)
+# =============================================================================
+  - name: "testing-validation"
+    description: "Antagonist validates tests are real and comprehensive"
+    
+    # Approval: User reviews test results
+    approval:
+      required: true
+      prompt: |
+        # Testing Complete - Review Required
+        
+        All tests have been generated and executed.
+        
+        ## Test Results
+        {{test_execution_report}}
+        
+        ## Test Report Files
+        {{test_report_files}}
+        
+        **Review test results in {{tests_dir}}/ before proceeding.**
+        
+        Next step: Antagonist validation will verify tests are real (not stubs)
+        and comprehensive.
+        
+        **Approve** to proceed with antagonist test validation.
+        **Deny** to stop and review test results manually.
+    
+    steps:
+      # Step 1: Antagonist test review via isolated sub-recipe
+      # This sub-recipe has TRUE context isolation - no inherited context
+      - id: "antagonist-test-review"
+        recipe: "antagonist-test-validator.yaml"
+        context:
+          tests_dir: "{{tests_dir}}"
+          requirements_dir: "{{requirements_dir}}"
+          design_dir: "{{design_dir}}"
+          validation_dir: "{{validation_dir}}"
+          implementation_summary_path: "{{state_dir}}/implementation-summary.md"
+          max_iterations: "{{max_test_iterations}}"
+          current_iteration: "{{current_test_iteration}}"
+        output: "antagonist_test_validation_result"
+        timeout: 3600
+      
+      # Step 2: Extract antagonist test findings from sub-recipe result
+      - id: "extract-test-findings"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Extract Antagonist Test Findings
+          
+          **Sub-Recipe Result:**
+          {{antagonist_test_validation_result}}
+          
+          Extract the antagonist_test_findings and iteration_decision for use in iteration logic.
+          
+          Return JSON with the key information extracted.
+        output: "antagonist_test_report"
+        timeout: 60
+      
+      # Step 3: Fix test issues if needed (based on antagonist findings)
+      - id: "fix-test-issues"
+        condition: "{{antagonist_test_validation_result.iteration_decision.iteration_needed}} == true"
+        agent: "foundation:bug-hunter"
+        prompt: |
+          ## Task: Fix Test Issues Identified by Antagonist
+          
+          **Antagonist Report:**
+          {{antagonist_test_validation_result.antagonist_test_findings}}
+          
+          **Current Iteration:** {{current_test_iteration}} / {{max_test_iterations}}
+          
+          **Your Task:**
+          Address each issue identified by the antagonist:
+          
+          1. For stub tests:
+             - Add REAL assertions (not assert True)
+             - Add proper test data
+             - Exercise actual code paths
+             - Verify expected behavior
+          
+          2. For coverage gaps:
+             - Add missing test cases
+             - Cover edge cases (null, empty, boundary values)
+             - Test error paths and exceptions
+             - Add security tests
+          
+          3. For quality issues:
+             - Fix flaky tests (remove sleep, fix timing)
+             - Add proper setup/teardown
+             - Remove hardcoded assumptions
+             - Add test docstrings
+          
+          Use read_file and edit_file to update test files.
+          Re-run tests after changes to verify they pass.
+          
+          **Output:**
+          Report of fixes made and verification results.
+        output: "test_iteration_report"
+        timeout: 3600
+      
+      # Step 4: Re-run antagonist test validation if we iterated
+      - id: "rerun-antagonist-test-validation"
+        condition: "{{antagonist_test_validation_result.iteration_decision.iteration_needed}} == true"
+        recipe: "antagonist-test-validator.yaml"
+        context:
+          tests_dir: "{{tests_dir}}"
+          requirements_dir: "{{requirements_dir}}"
+          design_dir: "{{design_dir}}"
+          validation_dir: "{{validation_dir}}"
+          implementation_summary_path: "{{state_dir}}/implementation-summary.md"
+          max_iterations: "{{max_test_iterations}}"
+          current_iteration: "{{current_test_iteration + 1}}"
+        output: "final_test_validation"
+        timeout: 3600
+      
+      # Step 5: Consolidate test validation results
+      - id: "consolidate-test-validation-results"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Consolidate Test Validation Results
+          
+          **Initial Validation:**
+          {{antagonist_test_validation_result}}
+          
+          **Iteration Report (if any):**
+          {{test_iteration_report}}
+          
+          **Final Validation (if re-run):**
+          {{final_test_validation}}
+          
+          Create consolidated summary:
+          - Initial findings (stub tests, coverage gaps, quality issues)
+          - Fixes applied
+          - Final status (stub count, coverage %, remaining issues)
+          - Recommendation
+          
+          Save to {{validation_dir}}/test-validation-summary.md
+        output: "test_validation_files"
+        timeout: 300
+    
+    # Final approval: User validates tests are comprehensive
+    approval:
+      required: true
+      prompt: |
+        # Test Validation Complete - Final Approval
+        
+        Tests have been validated by antagonist reviewer and iterated based on findings.
+        
+        ## Antagonist Test Review
+        {{antagonist_test_validation_result.antagonist_test_findings}}
+        
+        ## Test Iteration History
+        {{test_iteration_report}}
+        
+        ## Final Test Validation
+        {{final_test_validation}}
+        
+        ## Validation Reports
+        {{test_validation_files}}
+        
+        **Review validation reports in {{validation_dir}}/ before final approval.**
+        
+        **Approve** to proceed with project completion.
+        **Deny** to stop and make additional test improvements.
+
+# =============================================================================
+# STAGE 8: COMPLETION & HANDOFF
+# No approval - just generating final documentation
+# =============================================================================
+  - name: "completion-handoff"
+    description: "Generate final documentation and handoff materials"
+    
+    steps:
+      # Step 1: Generate project documentation
+      - id: "generate-project-documentation"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Generate Project Documentation
+          
+          Create comprehensive project documentation:
+          
+          ### 1. README.md
+          - Project overview
+          - Features
+          - Installation instructions
+          - Usage guide
+          - Configuration
+          - Development setup
+          
+          ### 2. ARCHITECTURE.md
+          - System architecture overview
+          - Component descriptions
+          - Data flow
+          - Technology stack
+          - Design decisions
+          
+          ### 3. API_DOCUMENTATION.md
+          - All API endpoints
+          - Request/response formats
+          - Authentication
+          - Error codes
+          - Examples
+          
+          ### 4. DEPLOYMENT.md
+          - Deployment process
+          - Environment configuration
+          - Monitoring setup
+          - Backup procedures
+          - Rollback procedures
+          
+          ### 5. TESTING.md
+          - How to run tests
+          - Test coverage
+          - CI/CD pipeline
+          - QA process
+          
+          ### 6. CONTRIBUTING.md
+          - Development workflow
+          - Code standards
+          - PR process
+          - Issue tracking
+          
+          Use write_file to create these documentation files.
+          
+          Base content on:
+          - Requirements: {{requirements_dir}}/
+          - Design: {{design_dir}}/
+          - Implementation: {{state_dir}}/implementation-summary.md
+          - Testing: {{tests_dir}}/test-report.md
+        output: "documentation_created"
+        timeout: 1800
+      
+      # Step 2: Create handoff report
+      - id: "create-handoff-report"
+        agent: "foundation:zen-architect"
+        mode: "ARCHITECT"
+        prompt: |
+          ## Task: Create Handoff Report
+          
+          Generate comprehensive handoff report covering entire project lifecycle.
+          
+          ### Executive Summary
+          - Project name and description
+          - Timeline (start to finish)
+          - Key deliverables
+          - Success metrics achieved
+          
+          ### Requirements Summary
+          - Original requirements
+          - Requirements fulfilled
+          - Requirements deferred (if any)
+          - Scope changes
+          
+          ### Design Summary
+          - Architecture decisions
+          - Technology choices
+          - Design patterns used
+          - Trade-offs made
+          
+          ### Implementation Summary
+          - Components built
+          - Lines of code written
+          - Major features implemented
+          - Known limitations
+          
+          ### Testing Summary
+          - Test coverage achieved
+          - Test categories covered
+          - Known issues or bugs
+          - Performance benchmarks
+          
+          ### Validation Summary
+          - Design validation results
+          - Test validation results
+          - Issues found and resolved
+          
+          ### Technical Debt
+          - Shortcuts taken
+          - Areas needing improvement
+          - Refactoring opportunities
+          
+          ### Future Enhancements
+          - Recommended next features
+          - Scalability improvements
+          - Maintenance priorities
+          
+          ### Operational Readiness
+          - Deployment status
+          - Monitoring setup
+          - Backup procedures
+          - Support documentation
+          
+          Save as: `HANDOFF_REPORT.md`
+        output: "handoff_report"
+        timeout: 1200
+      
+      # Step 3: Create final checklist
+      - id: "create-final-checklist"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Create Final Checklist
+          
+          Create comprehensive launch checklist:
+          
+          ### Pre-Launch Checklist
+          - [ ] All tests passing
+          - [ ] Code reviewed
+          - [ ] Security audit complete
+          - [ ] Performance benchmarks met
+          - [ ] Documentation complete
+          - [ ] Environment variables configured
+          - [ ] Database migrations tested
+          - [ ] Backup procedures tested
+          - [ ] Monitoring configured
+          - [ ] Error tracking configured
+          - [ ] SSL certificates installed
+          - [ ] Domain configured
+          - [ ] CDN configured (if applicable)
+          - [ ] Load balancer configured (if applicable)
+          - [ ] Disaster recovery plan documented
+          - [ ] Support team trained
+          - [ ] User documentation published
+          - [ ] Legal review complete (terms, privacy policy)
+          - [ ] GDPR compliance verified (if applicable)
+          - [ ] Accessibility compliance verified
+          - [ ] Browser compatibility tested
+          - [ ] Mobile responsiveness tested
+          - [ ] SEO optimization complete (if applicable)
+          - [ ] Analytics configured
+          - [ ] A/B testing framework setup (if applicable)
+          - [ ] Feature flags configured
+          - [ ] Rollback plan documented
+          - [ ] Post-launch monitoring plan
+          - [ ] Incident response plan
+          
+          ### Post-Launch Checklist
+          - [ ] Monitor error rates
+          - [ ] Monitor performance metrics
+          - [ ] Collect user feedback
+          - [ ] Address critical issues
+          - [ ] Schedule retrospective
+          
+          Save as: `LAUNCH_CHECKLIST.md`
+        output: "launch_checklist"
+        timeout: 300
+      
+      # Step 4: Update final project state
+      - id: "update-final-state"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Update Final Project State
+          
+          Update {{state_dir}}/project-state.json with final status:
+          
+          ```json
+          {
+            "project_name": "{{project_name}}",
+            "status": "complete",
+            "requirements_complete": true,
+            "design_complete": true,
+            "implementation_complete": true,
+            "tests_complete": true,
+            "validation_complete": true,
+            "completion_date": "<current_date>",
+            "total_design_domains": <count>,
+            "total_implementation_tasks": <count>,
+            "total_tests": <count>,
+            "test_coverage_percent": <percent>,
+            "design_iterations": {{current_design_iteration}},
+            "test_iterations": {{current_test_iteration}},
+            "files_created": <count>,
+            "documentation_files": [...]
+          }
+          ```
+          
+          Use write_file to update the state file.
+        output: "final_state"
+        timeout: 300
+      
+      # Step 5: Generate completion summary
+      - id: "completion-summary"
+        agent: "foundation:zen-architect"
+        prompt: |
+          ## Task: Generate Completion Summary
+          
+          **Project State:**
+          {{final_state}}
+          
+          **Handoff Report:**
+          {{handoff_report}}
+          
+          **Documentation:**
+          {{documentation_created}}
+          
+          **Launch Checklist:**
+          {{launch_checklist}}
+          
+          Generate final completion summary:
+          
+          # Project Development Complete! 🎉
+          
+          ## Project: {{project_name}}
+          
+          ### What Was Built
+          <Summary of implementation>
+          
+          ### Key Metrics
+          - Design domains: <count>
+          - Implementation tasks: <count>
+          - Tests created: <count>
+          - Test coverage: <percent>
+          - Design iterations: {{current_design_iteration}}
+          - Test iterations: {{current_test_iteration}}
+          
+          ### Deliverables
+          - Requirements documentation: {{requirements_dir}}/
+          - Design specifications: {{design_dir}}/
+          - Implementation: <main code directories>
+          - Test suite: {{tests_dir}}/
+          - Documentation: README.md, ARCHITECTURE.md, etc.
+          - Handoff report: HANDOFF_REPORT.md
+          - Launch checklist: LAUNCH_CHECKLIST.md
+          
+          ### Validation
+          - Design validated by antagonist reviewer: ✓
+          - Tests validated by antagonist reviewer: ✓
+          - All critical tests passing: ✓
+          
+          ### Next Steps
+          1. Review launch checklist (LAUNCH_CHECKLIST.md)
+          2. Complete pre-launch items
+          3. Schedule deployment
+          4. Monitor post-launch metrics
+          
+          ### Support
+          - Full documentation in repository
+          - Handoff report contains all context
+          - Known issues documented in {{validation_dir}}/
+          
+          ---
+          
+          **Project development recipe execution complete.**
+          
+          All artifacts are in the working directory and {{state_dir}}/.
+          
+          The project is ready for final review and deployment preparation.
+        output: "completion_summary"
+        timeout: 300
+
+# =============================================================================
+# METADATA
+# =============================================================================
+metadata:
+  estimated_runtime: "hours to days (depends on project scale)"
+  resumable: true
+  state_persistence: ".amplifier/project-state.json"
+  
+  requirements:
+    agents:
+      - "foundation:explorer (requirements, tasks, documentation)"
+      - "foundation:zen-architect (design, architecture, implementation)"
+      - "foundation:bug-hunter (testing, validation)"
+    
+    model_usage:
+      opus: "Architecture design, strategy, antagonist reviews (ARCHITECT mode)"
+      sonnet: "Implementation, detailed design, feature development (default)"
+      haiku: "Simple tasks, file organization, summaries (explorer agent)"
+  
+  approval_gates:
+    - stage: "design-validation"
+      description: "User must approve design before implementation"
+      critical: true
+    
+    - stage: "implementation-execution"
+      description: "User must approve implementation before testing"
+      critical: true
+    
+    - stage: "testing-validation"
+      description: "User must approve tests before completion"
+      critical: true
+  
+  key_features:
+    - "Iterative requirements gathering from minimal input"
+    - "Parallel design generation (4-6 domains simultaneously)"
+    - "True antagonist validation with fresh context"
+    - "Context-managed implementation (main session stays lightweight)"
+    - "Shadow environment testing"
+    - "Automatic modularization (dozens to hundreds of files)"
+    - "3 critical approval gates for human oversight"
+    - "Resumable after interruption"
+    - "Comprehensive testing with antagonist validation"
+    - "Complete handoff documentation"
+  
+  observed_patterns_implemented:
+    - "Master-coordinator with sub-agent delegation"
+    - "Context isolation for sub-agents"
+    - "Parallel execution (foreach with parallel: true)"
+    - "Progressive refinement with iteration limits"
+    - "Antagonist validation with separate sessions"
+    - "Automatic file modularization"
+    - "Shadow environment isolation"
+    - "State persistence for resumability"
+  
+  customization_points:
+    - "Adjust max_design_iterations and max_test_iterations"
+    - "Modify design_domains based on project type"
+    - "Customize task breakdown granularity"
+    - "Add/remove test categories"
+    - "Configure shadow environment settings"
+    - "Specify technology-specific agents"
+    - "Extend with additional validation phases"
+  
+  limitations:
+    - "Requires human oversight at 3 approval gates"
+    - "Long runtime (hours to days) for large projects"
+    - "Antagonist validation simulated with critical prompt (separate sub-recipe would be better)"
+    - "Implementation execution is sequential (real parallelization would need container orchestration)"
+    - "Test execution requires actual test framework setup"
+    - "Shadow environment must be configured externally"
+  
+  future_enhancements:
+    - "Separate antagonist sub-recipe files for true context isolation"
+    - "Container orchestration for parallel task execution"
+    - "Automatic git commit checkpoints after each stage"
+    - "Integration with project management tools (Jira, Linear)"
+    - "Automatic deployment pipeline generation"
+    - "Performance profiling and optimization phase"
+    - "Security audit phase with dedicated agents"
+    - "User acceptance testing (UAT) phase"
+    - "A/B test setup for feature rollout"

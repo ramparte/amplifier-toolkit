@@ -1,0 +1,323 @@
+---
+name: "antagonist-design-validator"
+version: "1.0.0"
+description: |
+  Antagonist design validation with TRUE context isolation.
+  
+  This sub-recipe is invoked independently with ZERO inherited context from the parent.
+  It reads design artifacts from the filesystem and forms completely independent judgments.
+  
+  Purpose: Be genuinely critical - find flaws, gaps, and risks in design specifications.
+  This is NOT a yes-man validator - it actively looks for problems.
+
+author: "Workflow Engineering Team"
+tags: ["antagonist", "validation", "design", "critical-review"]
+
+# Context inputs - MINIMAL, no design discussions/reasoning from parent
+context:
+  # Directory paths only - validator reads files independently
+  design_dir: ""
+  requirements_dir: ""
+  validation_dir: ""
+  
+  # Iteration control
+  max_iterations: 5
+  current_iteration: 0
+
+# No recursion needed for this validator
+recursion:
+  max_depth: 1
+  max_total_steps: 20
+
+stages:
+  - name: "antagonist-validation"
+    description: "Critical design review with fresh perspective"
+    
+    steps:
+      # Step 1: Read artifacts from filesystem (NO inherited context)
+      - id: "read-design-artifacts"
+        agent: "foundation:zen-architect"
+        mode: "ARCHITECT"
+        prompt: |
+          ## Task: Read Design Artifacts (Fresh Context)
+          
+          You are starting with ZERO prior knowledge of this project.
+          Read all design artifacts independently and form your own judgment.
+          
+          **Your Task:**
+          Read the following files from the filesystem:
+          
+          1. Requirements:
+             - {{requirements_dir}}/requirements.md
+             - {{requirements_dir}}/requirements.json
+          
+          2. Design Documents:
+             - {{design_dir}}/architecture-overview.md
+             - {{design_dir}}/design-consistency-report.md
+             - {{design_dir}}/integration-map.md
+             - All domain design files (*.md) in {{design_dir}}/
+          
+          Use read_file tool to load each document.
+          
+          After reading, provide a summary of what you understand:
+          - Project purpose
+          - Key requirements
+          - Design approach
+          - Number of domains
+          - Major architectural decisions
+          
+          This is your baseline understanding. You will critique this in the next step.
+        output: "baseline_understanding"
+        timeout: 900
+      
+      # Step 2: Critical design analysis
+      - id: "critical-design-analysis"
+        agent: "foundation:zen-architect"
+        mode: "ARCHITECT"
+        prompt: |
+          ## Task: ANTAGONIST Design Review (Be Genuinely Critical)
+          
+          **Your Role:**
+          You are a senior architect reviewing a design created by another team.
+          Your job is to find flaws, gaps, and risks - NOT to approve.
+          Be skeptical, thorough, and demanding.
+          
+          **What You Read:**
+          {{baseline_understanding}}
+          
+          **Critical Review Framework:**
+          
+          ### 1. Requirements Coverage Analysis
+          - Compare requirements.json against design documents
+          - Identify requirements with NO clear design solution
+          - Check if non-functional requirements (security, performance, accessibility) are adequately designed
+          - List specific requirement IDs that lack clear implementation path
+          
+          ### 2. Architecture Red Flags
+          - **Scalability**: Single points of failure? Bottlenecks?
+          - **Reliability**: How does it handle failures?
+          - **Over/Under-engineering**: Too complex or too naive?
+          - **Technology mismatches**: Are tech choices appropriate?
+          - **Data consistency**: How is consistency maintained?
+          - **State management**: Clear strategy or ad-hoc?
+          
+          ### 3. Data Model Critique
+          - Schema normalization issues
+          - Missing indexes for common queries
+          - Data migration complexity
+          - Referential integrity gaps
+          - Performance implications of data structure choices
+          
+          ### 4. API Design Problems
+          - Inconsistent naming or conventions
+          - RESTful principle violations
+          - Versioning strategy absent or unclear
+          - Error handling inadequate
+          - Authentication/authorization gaps in API specs
+          
+          ### 5. Security Vulnerabilities
+          - Authentication weaknesses (session management, token handling)
+          - Authorization gaps (privilege escalation risks)
+          - Data protection issues (encryption at rest/transit)
+          - Input validation missing
+          - OWASP Top 10 vulnerabilities not addressed
+          
+          ### 6. Implementation Risk Assessment
+          - Complexity that WILL cause delays
+          - Dependencies on external services (failure modes?)
+          - Testing challenges (how to test this design?)
+          - Deployment risks (migration complexity, rollback plans?)
+          
+          ### 7. Maintenance & Extensibility
+          - Technical debt being created
+          - How painful will changes be?
+          - Documentation gaps
+          - Code organization issues
+          
+          **Be Specific:**
+          - Reference EXACT files, sections, line content
+          - Provide CONCRETE examples of problems
+          - Compare against industry best practices
+          - Suggest SPECIFIC fixes with rationale
+          
+          **Output Format (JSON):**
+          ```json
+          {
+            "overall_assessment": "major-issues | moderate-issues | minor-issues",
+            "critical_gaps": [
+              {
+                "category": "requirements-coverage | architecture | data-model | api-design | security | implementation-risk | maintenance",
+                "file": "exact/file/path.md",
+                "section": "section name or line reference",
+                "issue": "detailed description of the problem",
+                "impact": "high | medium | low",
+                "why_critical": "explain why this matters",
+                "recommendation": "specific fix with rationale",
+                "effort_to_fix": "small | medium | large"
+              }
+            ],
+            "moderate_issues": [
+              {
+                "category": "...",
+                "file": "...",
+                "issue": "...",
+                "impact": "medium",
+                "recommendation": "..."
+              }
+            ],
+            "minor_issues": [
+              {
+                "category": "...",
+                "issue": "...",
+                "recommendation": "..."
+              }
+            ],
+            "requirements_not_covered": [
+              {
+                "req_id": "REQ-XXX",
+                "description": "requirement description",
+                "why_not_covered": "explanation"
+              }
+            ],
+            "total_issues": 0,
+            "recommendation": "major-revision | moderate-revision | minor-revision | acceptable",
+            "iteration_needed": true,
+            "summary": "2-3 sentence overall assessment"
+          }
+          ```
+          
+          **Remember:** Your goal is to find problems, not to approve. Be critical but constructive.
+        output: "antagonist_findings"
+        timeout: 2400
+      
+      # Step 3: Detailed issue documentation
+      - id: "document-findings"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Document Antagonist Findings
+          
+          **Antagonist Analysis:**
+          {{antagonist_findings}}
+          
+          **Your Task:**
+          Create detailed validation report in {{validation_dir}}/antagonist-design-review.md
+          
+          Structure the report:
+          
+          # Antagonist Design Validation Report
+          
+          **Date:** <current date>
+          **Iteration:** {{current_iteration}} / {{max_iterations}}
+          **Validation Status:** {{antagonist_findings.recommendation}}
+          
+          ## Executive Summary
+          {{antagonist_findings.summary}}
+          
+          **Total Issues Found:** {{antagonist_findings.total_issues}}
+          - Critical: <count>
+          - Moderate: <count>
+          - Minor: <count>
+          
+          ## Overall Assessment
+          {{antagonist_findings.overall_assessment}}
+          
+          ## Critical Gaps (MUST FIX)
+          
+          For each critical gap:
+          ### [Category] Issue Title
+          - **File:** <file path>
+          - **Section:** <section>
+          - **Impact:** High
+          - **Problem:** <detailed description>
+          - **Why Critical:** <explanation>
+          - **Recommendation:** <specific fix>
+          - **Effort:** <effort estimate>
+          
+          ## Moderate Issues (SHOULD FIX)
+          
+          <similar structure>
+          
+          ## Minor Issues (NICE TO FIX)
+          
+          <similar structure>
+          
+          ## Requirements Not Covered
+          
+          <list with req IDs>
+          
+          ## Recommendation
+          
+          **Action Required:** {{antagonist_findings.recommendation}}
+          
+          **Next Steps:**
+          - <specific actions>
+          
+          ---
+          
+          *This validation was performed with fresh context, independent of design discussions.*
+          
+          Use write_file to create this report.
+        output: "report_saved"
+        timeout: 600
+      
+      # Step 4: Check if iteration is needed
+      - id: "check-iteration-needed"
+        agent: "foundation:explorer"
+        prompt: |
+          ## Task: Determine If Design Iteration Required
+          
+          **Antagonist Findings:**
+          {{antagonist_findings}}
+          
+          **Current Iteration:** {{current_iteration}}
+          **Max Iterations:** {{max_iterations}}
+          
+          **Decision Logic:**
+          - If recommendation is "acceptable" → No iteration needed
+          - If recommendation is "minor-revision" and current_iteration > 2 → No iteration (diminishing returns)
+          - If recommendation is "moderate-revision" or "major-revision" and current_iteration < max_iterations → Iteration needed
+          - If current_iteration >= max_iterations → No iteration (limit reached)
+          
+          Return JSON:
+          ```json
+          {
+            "iteration_needed": true/false,
+            "reason": "explanation",
+            "recommendation": "{{antagonist_findings.recommendation}}",
+            "total_issues": {{antagonist_findings.total_issues}},
+            "critical_issues_count": <count>
+          }
+          ```
+        output: "iteration_decision"
+        timeout: 120
+
+# Output the validation results to parent recipe
+output:
+  antagonist_findings: "{{antagonist_findings}}"
+  iteration_decision: "{{iteration_decision}}"
+  report_location: "{{validation_dir}}/antagonist-design-review.md"
+  validation_complete: true
+
+# Metadata
+metadata:
+  context_isolation: "COMPLETE - No inherited context from parent recipe"
+  purpose: "Critical design validation by independent antagonist reviewer"
+  
+  key_principles:
+    - "Starts with zero knowledge - reads artifacts fresh"
+    - "Actively looks for problems, not confirmation"
+    - "Specific, actionable feedback with file references"
+    - "Compares against industry best practices"
+    - "Independent judgment formation"
+  
+  usage_from_parent:
+    example: |
+      - id: "antagonist-design-review"
+        recipe: "antagonist-design-validator.yaml"
+        context:
+          design_dir: "{{design_dir}}"
+          requirements_dir: "{{requirements_dir}}"
+          validation_dir: "{{validation_dir}}"
+          max_iterations: 5
+          current_iteration: 0
+        output: "antagonist_validation_result"
