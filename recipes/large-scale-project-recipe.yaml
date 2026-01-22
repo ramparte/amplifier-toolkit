@@ -278,6 +278,7 @@ stages:
           }
           ```
         output: "design_domains_list"
+        parse_json: true
         timeout: 600
       
       # Step 2: Parallel design generation for critical domains
@@ -467,6 +468,7 @@ stages:
           max_iterations: "{{max_design_iterations}}"
           current_iteration: "{{current_design_iteration}}"
         output: "antagonist_validation_result"
+        parse_json: true
         timeout: 3600
       
       # Step 2: Extract antagonist findings from sub-recipe result
@@ -535,6 +537,7 @@ stages:
           max_iterations: "{{max_design_iterations}}"
           current_iteration: "{{current_design_iteration + 1}}"
         output: "final_antagonist_validation"
+        parse_json: true
         timeout: 3600
       
       # Step 5: Consolidate validation results
@@ -1217,6 +1220,7 @@ stages:
           max_iterations: "{{max_test_iterations}}"
           current_iteration: "{{current_test_iteration}}"
         output: "antagonist_test_validation_result"
+        parse_json: true
         timeout: 3600
       
       # Step 2: Extract antagonist test findings from sub-recipe result
@@ -1289,6 +1293,7 @@ stages:
           max_iterations: "{{max_test_iterations}}"
           current_iteration: "{{current_test_iteration + 1}}"
         output: "final_test_validation"
+        parse_json: true
         timeout: 3600
       
       # Step 5: Consolidate test validation results
