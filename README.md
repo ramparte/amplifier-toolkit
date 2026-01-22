@@ -24,6 +24,14 @@ includes:
   - bundle: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/m365-collab
 ```
 
+### Examples (`examples/`)
+
+Working demonstrations of Amplifier patterns:
+
+| Example | Description |
+|---------|-------------|
+| [`continuous-code-review`](examples/continuous-code-review/) | Automated code review on every commit (inspired by roborev) |
+
 ### Recipes (`recipes/`)
 
 | Recipe | Description |
