@@ -458,6 +458,7 @@ stages:
       # Step 1: Antagonist design review via isolated sub-recipe
       # This sub-recipe has TRUE context isolation - no inherited context
       - id: "antagonist-design-review"
+        type: "recipe"
         recipe: "antagonist-design-validator.yaml"
         context:
           design_dir: "{{design_dir}}"
@@ -524,6 +525,7 @@ stages:
       
       # Step 4: Re-run antagonist validation if we iterated
       - id: "rerun-antagonist-validation"
+        type: "recipe"
         condition: "{{antagonist_validation_result.iteration_decision.iteration_needed}} == true"
         recipe: "antagonist-design-validator.yaml"
         context:
@@ -1204,6 +1206,7 @@ stages:
       # Step 1: Antagonist test review via isolated sub-recipe
       # This sub-recipe has TRUE context isolation - no inherited context
       - id: "antagonist-test-review"
+        type: "recipe"
         recipe: "antagonist-test-validator.yaml"
         context:
           tests_dir: "{{tests_dir}}"
@@ -1274,6 +1277,7 @@ stages:
       
       # Step 4: Re-run antagonist test validation if we iterated
       - id: "rerun-antagonist-test-validation"
+        type: "recipe"
         condition: "{{antagonist_test_validation_result.iteration_decision.iteration_needed}} == true"
         recipe: "antagonist-test-validator.yaml"
         context:
