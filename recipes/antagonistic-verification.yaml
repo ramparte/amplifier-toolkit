@@ -1,0 +1,379 @@
+name: "antagonistic-verification"
+description: "Forensic verification of implementation claims - finds gaps, mocks, incomplete work"
+version: "1.0.0"
+author: "Amplifier Foundation"
+tags: ["verification", "testing", "quality-assurance", "forensic"]
+
+# This recipe implements the antagonistic verification pattern:
+# - High context isolation (work from evidence, not claims)
+# - Skeptical default (assume incomplete until proven)
+# - Evidence-based analysis (grep, count, test results)
+# - Multi-dimensional verification (parallel analysis)
+# - Comprehensive gap detection
+#
+# Use this when:
+# - Implementor claims work is complete
+# - You need independent verification
+# - Testing claimed test coverage or evidence
+# - Catching corner-cutting or mocked implementations
+#
+# Typical runtime: 3-8 minutes
+# Required agents: foundation:zen-architect
+#
+# Usage:
+#   amplifier tool invoke recipes operation=execute recipe_path=antagonistic-verification.yaml context='{"target_path":"./src"}'
+
+context:
+  # Required inputs
+  target_path: ""                    # Directory to verify (e.g., ./src, ./feature-x)
+  
+  # Optional configuration
+  test_command: "pytest -v"          # Command to run tests
+  language: "python"                 # Programming language (python, javascript, go, etc.)
+
+steps:
+  # ============================================================================
+  # PHASE 1: FORENSIC EVIDENCE COLLECTION (Objective, automated)
+  # ============================================================================
+  
+  - id: "collect-file-inventory"
+    bash: |
+      cd {{target_path}} || exit 1
+      
+      # Count files by type
+      total_files=$(find . -type f -name "*.py" | wc -l)
+      test_files=$(find . -type f -name "*test*.py" -o -name "test_*.py" | wc -l)
+      
+      # Generate JSON
+      jq -n \
+        --arg total "$total_files" \
+        --arg tests "$test_files" \
+        '{"total_files": ($total|tonumber), "test_files": ($tests|tonumber), "implementation_files": (($total|tonumber) - ($tests|tonumber))}'
+    parse_json: true
+    output: "file_inventory"
+    timeout: 60
+  
+  - id: "scan-for-mocks"
+    bash: |
+      cd {{target_path}} || exit 1
+      
+      # Search for mock patterns
+      mock_count=$(grep -r "Mock\|MagicMock\|patch\|mock\.Mock" --include="*.py" . 2>/dev/null | wc -l)
+      mock_files=$(grep -l "Mock\|MagicMock" --include="*.py" -r . 2>/dev/null | jq -R . | jq -s . || echo '[]')
+      
+      jq -n \
+        --argjson mocks "$mock_count" \
+        --argjson mock_files "$mock_files" \
+        '{"mock_count": $mocks, "files_with_mocks": $mock_files}'
+    parse_json: true
+    output: "mock_scan"
+    timeout: 120
+  
+  - id: "scan-for-todos"
+    bash: |
+      cd {{target_path}} || exit 1
+      
+      # Search for incomplete work markers
+      todo_count=$(grep -r "TODO\|FIXME\|XXX\|HACK" --include="*.py" . 2>/dev/null | wc -l)
+      stub_count=$(grep -r "NotImplementedError\|raise NotImplemented\|pass  # stub\|pass # TODO" --include="*.py" . 2>/dev/null | wc -l)
+      
+      stub_files=$(grep -l "NotImplementedError" --include="*.py" -r . 2>/dev/null | jq -R . | jq -s . || echo '[]')
+      
+      jq -n \
+        --argjson todos "$todo_count" \
+        --argjson stubs "$stub_count" \
+        --argjson stub_files "$stub_files" \
+        '{"todo_count": $todos, "stub_count": $stubs, "files_with_stubs": $stub_files}'
+    parse_json: true
+    output: "incomplete_scan"
+    timeout: 120
+  
+  - id: "scan-for-error-handling"
+    bash: |
+      cd {{target_path}} || exit 1
+      
+      # Count error handling blocks
+      error_handling=$(grep -r "try:\|except\|except.*:" --include="*.py" . 2>/dev/null | wc -l)
+      bare_except=$(grep -r "except:\s*$" --include="*.py" . 2>/dev/null | wc -l)
+      
+      jq -n \
+        --argjson error_blocks "$error_handling" \
+        --argjson bare "$bare_except" \
+        '{"error_handling_count": $error_blocks, "bare_except_count": $bare}'
+    parse_json: true
+    output: "error_handling_scan"
+    timeout: 120
+  
+  - id: "run-actual-tests"
+    bash: |
+      cd {{target_path}} || exit 1
+      
+      # Run tests and capture results
+      test_output=$({{test_command}} 2>&1 || true)
+      exit_code=$?
+      
+      # Parse test results
+      passed=$(echo "$test_output" | grep -oP '(\d+) passed' | awk '{print $1}' || echo "0")
+      failed=$(echo "$test_output" | grep -oP '(\d+) failed' | awk '{print $1}' || echo "0")
+      skipped=$(echo "$test_output" | grep -oP '(\d+) skipped' | awk '{print $1}' || echo "0")
+      
+      actual_tests=$((${passed:-0} + ${failed:-0}))
+      
+      jq -n \
+        --argjson exit_code "$exit_code" \
+        --arg actual "${actual_tests}" \
+        --arg passed "${passed:-0}" \
+        --arg failed "${failed:-0}" \
+        --arg skipped "${skipped:-0}" \
+        '{"exit_code": $exit_code, "tests_run": ($actual|tonumber), "tests_passed": ($passed|tonumber), "tests_failed": ($failed|tonumber), "tests_skipped": ($skipped|tonumber), "all_passed": ($exit_code == 0)}'
+    parse_json: true
+    output: "test_results"
+    timeout: 300
+    on_error: "continue"
+  
+  # ============================================================================
+  # PHASE 2: MULTI-DIMENSIONAL ANALYSIS
+  # ============================================================================
+  
+  - id: "analyze-test-coverage"
+    agent: "foundation:zen-architect"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    depends_on: ["collect-file-inventory", "run-actual-tests"]
+    prompt: |
+      FORENSIC ANALYSIS - TEST COVERAGE DIMENSION
+      
+      You are a skeptical auditor analyzing test coverage.
+      
+      Evidence:
+      - File inventory: {{file_inventory}}
+      - Test results: {{test_results}}
+      - Work directory: {{target_path}}
+      
+      Calculate and assess:
+      1. Test-to-file ratio (tests / implementation files)
+      2. Test pass rate (passed / total)
+      3. Test quality (are they real tests or just mocks?)
+      
+      RED FLAGS:
+      - Test-to-file ratio < 0.3
+      - Test pass rate < 0.8
+      - All tests passed but tests_run = 0 (no real tests)
+      - High skipped test count
+      
+      Output format:
+      
+      VERDICT: [PASS/FAIL/SUSPICIOUS]
+      CONFIDENCE: [HIGH/MEDIUM/LOW]
+      
+      GAPS:
+      - [Specific gap with severity and evidence]
+      
+      EVIDENCE:
+      - Test-to-file ratio: [X]
+      - Test pass rate: [Y]
+      - [Other metrics]
+      
+      Be ruthlessly objective.
+    output: "test_coverage_analysis"
+    timeout: 600
+  
+  - id: "analyze-mock-usage"
+    agent: "foundation:zen-architect"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    depends_on: ["collect-file-inventory", "scan-for-mocks"]
+    prompt: |
+      FORENSIC ANALYSIS - MOCK VS REAL IMPLEMENTATION
+      
+      You are a skeptical auditor analyzing mock usage.
+      
+      Evidence:
+      - File inventory: {{file_inventory}}
+      - Mock scan: {{mock_scan}}
+      - Work directory: {{target_path}}
+      
+      Assess:
+      1. Mock-to-file ratio (mocks / files)
+      2. Are mocks in production code or just tests?
+      3. High mock usage suggests incomplete implementation
+      
+      RED FLAGS:
+      - Mock-to-file ratio > 2.0
+      - Mocks in production code (not just test files)
+      - Mock used as implementation instead of real logic
+      
+      Output format:
+      
+      VERDICT: [PASS/FAIL/SUSPICIOUS]
+      CONFIDENCE: [HIGH/MEDIUM/LOW]
+      
+      GAPS:
+      - [Specific gap with severity and evidence]
+      
+      EVIDENCE:
+      - Mock-to-file ratio: [X]
+      - Files with mocks: [list]
+      
+      Be ruthlessly objective.
+    output: "mock_analysis"
+    timeout: 600
+  
+  - id: "analyze-implementation-completeness"
+    agent: "foundation:zen-architect"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    depends_on: ["scan-for-todos"]
+    prompt: |
+      FORENSIC ANALYSIS - IMPLEMENTATION COMPLETENESS
+      
+      You are a skeptical auditor analyzing implementation completeness.
+      
+      Evidence:
+      - Incomplete scan: {{incomplete_scan}}
+      - Work directory: {{target_path}}
+      
+      Assess:
+      1. TODO/FIXME count (indicates rushed work)
+      2. NotImplementedError count (incomplete functions)
+      3. Stub functions (placeholder implementations)
+      
+      RED FLAGS:
+      - Any TODOs in production code
+      - Any NotImplementedError in production code
+      - Functions that just return None or pass
+      
+      Output format:
+      
+      VERDICT: [PASS/FAIL/SUSPICIOUS]
+      CONFIDENCE: [HIGH/MEDIUM/LOW]
+      
+      GAPS:
+      - [Specific gap with severity and evidence]
+      
+      EVIDENCE:
+      - TODO count: [X]
+      - Stub count: [Y]
+      - Files with stubs: [list]
+      
+      Be ruthlessly objective.
+    output: "completeness_analysis"
+    timeout: 600
+  
+  - id: "analyze-error-handling"
+    agent: "foundation:zen-architect"
+    provider: "anthropic"
+    model: "claude-sonnet-*"
+    depends_on: ["collect-file-inventory", "scan-for-error-handling"]
+    prompt: |
+      FORENSIC ANALYSIS - ERROR HANDLING ROBUSTNESS
+      
+      You are a skeptical auditor analyzing error handling.
+      
+      Evidence:
+      - File inventory: {{file_inventory}}
+      - Error handling scan: {{error_handling_scan}}
+      - Work directory: {{target_path}}
+      
+      Assess:
+      1. Error-handling-to-file ratio (error blocks / files)
+      2. Bare except usage (bad practice)
+      3. Missing error handling in critical paths
+      
+      RED FLAGS:
+      - Error-to-file ratio < 1.0 (minimal error handling)
+      - High bare except count (catching all errors blindly)
+      - No error handling at all (ratio = 0)
+      
+      Output format:
+      
+      VERDICT: [PASS/FAIL/SUSPICIOUS]
+      CONFIDENCE: [HIGH/MEDIUM/LOW]
+      
+      GAPS:
+      - [Specific gap with severity and evidence]
+      
+      EVIDENCE:
+      - Error-to-file ratio: [X]
+      - Bare except count: [Y]
+      
+      Be ruthlessly objective.
+    output: "error_handling_analysis"
+    timeout: 600
+  
+  # ============================================================================
+  # PHASE 3: SYNTHESIS AND GAP REPORT
+  # ============================================================================
+  
+  - id: "synthesize-findings"
+    agent: "foundation:zen-architect"
+    depends_on: ["analyze-test-coverage", "analyze-mock-usage", "analyze-implementation-completeness", "analyze-error-handling"]
+    prompt: |
+      SYNTHESIZE VERIFICATION FINDINGS
+      
+      You are synthesizing forensic verification results.
+      
+      Work directory: {{target_path}}
+      
+      Evidence collected:
+      - File inventory: {{file_inventory}}
+      - Mock scan: {{mock_scan}}
+      - Incomplete scan: {{incomplete_scan}}
+      - Error handling scan: {{error_handling_scan}}
+      - Test results: {{test_results}}
+      
+      Multi-dimensional analyses:
+      - Test coverage: {{test_coverage_analysis}}
+      - Mock usage: {{mock_analysis}}
+      - Implementation completeness: {{completeness_analysis}}
+      - Error handling: {{error_handling_analysis}}
+      
+      Create comprehensive verification report:
+      
+      ## Verification Summary
+      - Overall verdict: PASS / FAIL / NEEDS_WORK
+      - Confidence level: HIGH / MEDIUM / LOW
+      
+      ## Critical Gaps (Must Fix)
+      List all critical and high-severity gaps from dimension analyses.
+      Group by theme, prioritize by risk.
+      
+      ## Suspicious Patterns
+      - Patterns that need explanation
+      - Areas requiring closer inspection
+      
+      ## Actionable Task List
+      Prioritized list with HIGH/MEDIUM/LOW priorities:
+      - [ ] Task description (Priority: HIGH)
+      
+      ## Metrics Summary
+      - Test-to-file ratio: [X]
+      - Mock-to-file ratio: [Y]
+      - Error-to-file ratio: [Z]
+      - Test pass rate: [%]
+      
+      ## Confidence Assessment
+      What would increase confidence in this implementation?
+      
+      Format as structured markdown. Be specific. Be actionable. Be skeptical.
+    output: "verification_report"
+    timeout: 300
+  
+  - id: "save-report"
+    bash: |
+      cd {{target_path}} || exit 1
+      
+      cat > VERIFICATION_REPORT.md << 'EOF'
+      {{verification_report}}
+      EOF
+      
+      echo "Report saved to {{target_path}}/VERIFICATION_REPORT.md"
+    timeout: 30
+
+# Philosophy:
+# - NO trust in implementation claims - verify everything
+# - Assume incompleteness until proven otherwise
+# - Evidence-based verification (no trust in narratives)
+# - Context isolation (only pass forensic evidence between steps)
+# - Multi-dimensional analysis (test/mock/completeness/errors)
+# - Actionable output (task list, not just critique)

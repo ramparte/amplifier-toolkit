@@ -1,0 +1,401 @@
+name: "antagonistic-verification-with-fixes"
+description: "Forensic verification + automated remediation of gaps found"
+version: "1.0.0"
+author: "Amplifier Foundation"
+tags: ["verification", "testing", "quality-assurance", "remediation", "staged"]
+
+# This recipe extends antagonistic-verification with automated fix capability:
+# - All verification steps from verification-only recipe
+# - APPROVAL GATE before applying fixes
+# - Iterative fix-test loop until tests pass
+# - Final confirmation verification
+#
+# Use this when:
+# - You have authority to modify the implementation
+# - Gaps are expected and should be fixed automatically
+# - Iterative improvement is acceptable
+#
+# Typical runtime: 10-30 minutes (depends on gaps found)
+# Required agents: foundation:zen-architect, foundation:modular-builder
+#
+# Usage:
+#   amplifier tool invoke recipes operation=execute recipe_path=antagonistic-verification-with-fixes.yaml context='{"target_path":"./src"}'
+
+context:
+  target_path: ""                    # Directory to verify and fix
+  test_command: "pytest -v"          # Command to run tests
+  language: "python"                 # Programming language
+  max_fix_iterations: 5              # Safety limit on fix attempts
+
+stages:
+  # ============================================================================
+  # STAGE 1: FORENSIC VERIFICATION (No approval - gathering evidence)
+  # ============================================================================
+  
+  - name: "forensic-verification"
+    steps:
+      - id: "collect-file-inventory"
+        bash: |
+          cd {{target_path}} || exit 1
+          total_files=$(find . -type f -name "*.py" | wc -l)
+          test_files=$(find . -type f -name "*test*.py" -o -name "test_*.py" | wc -l)
+          jq -n \
+            --arg total "$total_files" \
+            --arg tests "$test_files" \
+            '{"total_files": ($total|tonumber), "test_files": ($tests|tonumber), "implementation_files": (($total|tonumber) - ($tests|tonumber))}'
+        parse_json: true
+        output: "file_inventory"
+        timeout: 60
+      
+      - id: "scan-for-mocks"
+        bash: |
+          cd {{target_path}} || exit 1
+          mock_count=$(grep -r "Mock\|MagicMock\|patch\|mock\.Mock" --include="*.py" . 2>/dev/null | wc -l)
+          mock_files=$(grep -l "Mock\|MagicMock" --include="*.py" -r . 2>/dev/null | jq -R . | jq -s . || echo '[]')
+          jq -n \
+            --argjson mocks "$mock_count" \
+            --argjson mock_files "$mock_files" \
+            '{"mock_count": $mocks, "files_with_mocks": $mock_files}'
+        parse_json: true
+        output: "initial_mock_scan"
+        timeout: 120
+      
+      - id: "scan-for-todos"
+        bash: |
+          cd {{target_path}} || exit 1
+          todo_count=$(grep -r "TODO\|FIXME\|XXX\|HACK" --include="*.py" . 2>/dev/null | wc -l)
+          stub_count=$(grep -r "NotImplementedError\|raise NotImplemented\|pass  # stub\|pass # TODO" --include="*.py" . 2>/dev/null | wc -l)
+          stub_files=$(grep -l "NotImplementedError" --include="*.py" -r . 2>/dev/null | jq -R . | jq -s . || echo '[]')
+          jq -n \
+            --argjson todos "$todo_count" \
+            --argjson stubs "$stub_count" \
+            --argjson stub_files "$stub_files" \
+            '{"todo_count": $todos, "stub_count": $stubs, "files_with_stubs": $stub_files}'
+        parse_json: true
+        output: "initial_incomplete_scan"
+        timeout: 120
+      
+      - id: "scan-for-error-handling"
+        bash: |
+          cd {{target_path}} || exit 1
+          error_handling=$(grep -r "try:\|except\|except.*:" --include="*.py" . 2>/dev/null | wc -l)
+          bare_except=$(grep -r "except:\s*$" --include="*.py" . 2>/dev/null | wc -l)
+          jq -n \
+            --argjson error_blocks "$error_handling" \
+            --argjson bare "$bare_except" \
+            '{"error_handling_count": $error_blocks, "bare_except_count": $bare}'
+        parse_json: true
+        output: "initial_error_scan"
+        timeout: 120
+      
+      - id: "run-initial-tests"
+        bash: |
+          cd {{target_path}} || exit 1
+          test_output=$({{test_command}} 2>&1 || true)
+          exit_code=$?
+          passed=$(echo "$test_output" | grep -oP '(\d+) passed' | awk '{print $1}' || echo "0")
+          failed=$(echo "$test_output" | grep -oP '(\d+) failed' | awk '{print $1}' || echo "0")
+          skipped=$(echo "$test_output" | grep -oP '(\d+) skipped' | awk '{print $1}' || echo "0")
+          actual_tests=$((${passed:-0} + ${failed:-0}))
+          jq -n \
+            --argjson exit_code "$exit_code" \
+            --arg actual "${actual_tests}" \
+            --arg passed "${passed:-0}" \
+            --arg failed "${failed:-0}" \
+            --arg skipped "${skipped:-0}" \
+            '{"exit_code": $exit_code, "tests_run": ($actual|tonumber), "tests_passed": ($passed|tonumber), "tests_failed": ($failed|tonumber), "tests_skipped": ($skipped|tonumber), "all_passed": ($exit_code == 0)}'
+        parse_json: true
+        output: "initial_test_results"
+        timeout: 300
+        on_error: "continue"
+      
+      - id: "analyze-all-dimensions"
+        agent: "foundation:zen-architect"
+        provider: "anthropic"
+        model: "claude-sonnet-*"
+        depends_on: ["collect-file-inventory", "scan-for-mocks", "scan-for-todos", "scan-for-error-handling", "run-initial-tests"]
+        prompt: |
+          COMPREHENSIVE FORENSIC ANALYSIS
+          
+          You are a skeptical auditor analyzing implementation quality across all dimensions.
+          
+          Evidence:
+          - File inventory: {{file_inventory}}
+          - Mock scan: {{initial_mock_scan}}
+          - Incomplete scan: {{initial_incomplete_scan}}
+          - Error handling scan: {{initial_error_scan}}
+          - Test results: {{initial_test_results}}
+          - Work directory: {{target_path}}
+          
+          Analyze across ALL dimensions:
+          1. Test coverage (test-to-file ratio, pass rate)
+          2. Mock usage (mock-to-file ratio, production mocks)
+          3. Implementation completeness (TODOs, NotImplementedError)
+          4. Error handling (error-to-file ratio, bare excepts)
+          
+          Output format:
+          
+          ## Overall Verdict: PASS / FAIL / NEEDS_WORK
+          
+          ## Critical Gaps
+          - [Gap with severity, file, and specific issue]
+          
+          ## Metrics
+          - Test-to-file ratio: [X]
+          - Mock-to-file ratio: [Y]
+          - Error-to-file ratio: [Z]
+          - TODO count: [N]
+          - Stub count: [M]
+          
+          Be ruthlessly objective.
+        output: "comprehensive_analysis"
+        timeout: 600
+      
+      - id: "extract-actionable-gaps"
+        agent: "foundation:zen-architect"
+        depends_on: ["analyze-all-dimensions"]
+        prompt: |
+          Extract actionable gaps from comprehensive analysis.
+          
+          Analysis: {{comprehensive_analysis}}
+          
+          Create JSON array of gaps that can be fixed programmatically.
+          Limit to top {{max_fix_iterations}} most critical gaps.
+          
+          Output ONLY valid JSON (no markdown, no explanation):
+          
+          {"gaps": [
+            {
+              "id": "gap-1",
+              "description": "Brief description",
+              "file": "path/to/file.py",
+              "fix_strategy": "replace-mock|implement-function|add-tests|add-error-handling",
+              "priority": 1
+            }
+          ]}
+          
+          Only include gaps that are ACTIONABLE (can fix with code changes).
+        parse_json: true
+        output: "actionable_gaps"
+        timeout: 300
+      
+      - id: "save-initial-report"
+        bash: |
+          cd {{target_path}} || exit 1
+          cat > VERIFICATION_REPORT_INITIAL.md << 'EOF'
+          # Initial Verification Report
+          
+          {{comprehensive_analysis}}
+          
+          ## Actionable Gaps Identified
+          {{actionable_gaps}}
+          EOF
+          echo "Initial report saved"
+        timeout: 30
+  
+  # ============================================================================
+  # STAGE 2: APPROVAL GATE - Review findings before fixes
+  # ============================================================================
+  
+  - name: "approval-gate"
+    approval:
+      required: true
+      prompt: |
+        # Verification Complete - Gaps Found
+        
+        ## Initial Metrics
+        - Files: {{file_inventory.total_files}} total, {{file_inventory.test_files}} tests
+        - Mocks: {{initial_mock_scan.mock_count}} references
+        - TODOs: {{initial_incomplete_scan.todo_count}}
+        - Stubs: {{initial_incomplete_scan.stub_count}}
+        - Error handling: {{initial_error_scan.error_handling_count}} blocks
+        - Tests: {{initial_test_results.tests_passed}}/{{initial_test_results.tests_run}} passed
+        
+        ## Comprehensive Analysis
+        {{comprehensive_analysis}}
+        
+        ## Actionable Gaps
+        {{actionable_gaps}}
+        
+        ⚠️  Approve to proceed with AUTOMATED FIXES.
+        Deny to stop and review manually.
+        
+        The recipe will iteratively fix each gap and re-test (max {{max_fix_iterations}} iterations).
+    steps: []
+  
+  # ============================================================================
+  # STAGE 3: ITERATIVE REMEDIATION
+  # ============================================================================
+  
+  - name: "remediation"
+    steps:
+      - id: "fix-gaps-iteratively"
+        foreach: "{{actionable_gaps.gaps}}"
+        as: "gap"
+        collect: "fix_results"
+        max_iterations: 10
+        agent: "foundation:modular-builder"
+        provider: "anthropic"
+        model: "claude-sonnet-*"
+        prompt: |
+          FIX IMPLEMENTATION GAP
+          
+          Gap: {{gap}}
+          Strategy: {{gap.fix_strategy}}
+          File: {{gap.file}}
+          Work directory: {{target_path}}
+          
+          Tasks:
+          1. Read current implementation
+          2. Apply fix according to strategy:
+             - replace-mock: Replace mock with real implementation
+             - implement-function: Complete TODO/stub function
+             - add-tests: Add missing test cases
+             - add-error-handling: Add proper error handling
+          3. Verify syntax is correct (use python_check if available)
+          4. Don't run tests yet (done separately)
+          
+          Return brief summary of changes made.
+        timeout: 600
+        on_error: "continue"
+      
+      - id: "run-tests-after-fixes"
+        bash: |
+          cd {{target_path}} || exit 1
+          test_output=$({{test_command}} 2>&1 || true)
+          exit_code=$?
+          passed=$(echo "$test_output" | grep -oP '(\d+) passed' | awk '{print $1}' || echo "0")
+          failed=$(echo "$test_output" | grep -oP '(\d+) failed' | awk '{print $1}' || echo "0")
+          jq -n \
+            --argjson exit_code "$exit_code" \
+            --arg passed "${passed:-0}" \
+            --arg failed "${failed:-0}" \
+            '{"exit_code": $exit_code, "tests_passed": ($passed|tonumber), "tests_failed": ($failed|tonumber), "all_passed": ($exit_code == 0)}'
+        parse_json: true
+        output: "post_fix_test_results"
+        timeout: 300
+  
+  # ============================================================================
+  # STAGE 4: FINAL CONFIRMATION
+  # ============================================================================
+  
+  - name: "final-confirmation"
+    steps:
+      - id: "recount-file-inventory"
+        bash: |
+          cd {{target_path}} || exit 1
+          total_files=$(find . -type f -name "*.py" | wc -l)
+          test_files=$(find . -type f -name "*test*.py" -o -name "test_*.py" | wc -l)
+          jq -n \
+            --arg total "$total_files" \
+            --arg tests "$test_files" \
+            '{"total_files": ($total|tonumber), "test_files": ($tests|tonumber)}'
+        parse_json: true
+        output: "final_file_inventory"
+        timeout: 60
+      
+      - id: "rescan-mocks"
+        bash: |
+          cd {{target_path}} || exit 1
+          mock_count=$(grep -r "Mock\|MagicMock\|patch\|mock\.Mock" --include="*.py" . 2>/dev/null | wc -l)
+          jq -n --argjson mocks "$mock_count" '{"mock_count": $mocks}'
+        parse_json: true
+        output: "final_mock_scan"
+        timeout: 120
+      
+      - id: "rescan-todos"
+        bash: |
+          cd {{target_path}} || exit 1
+          todo_count=$(grep -r "TODO\|FIXME\|XXX\|HACK" --include="*.py" . 2>/dev/null | wc -l)
+          stub_count=$(grep -r "NotImplementedError\|raise NotImplemented" --include="*.py" . 2>/dev/null | wc -l)
+          jq -n \
+            --argjson todos "$todo_count" \
+            --argjson stubs "$stub_count" \
+            '{"todo_count": $todos, "stub_count": $stubs}'
+        parse_json: true
+        output: "final_incomplete_scan"
+        timeout: 120
+      
+      - id: "rescan-error-handling"
+        bash: |
+          cd {{target_path}} || exit 1
+          error_handling=$(grep -r "try:\|except\|except.*:" --include="*.py" . 2>/dev/null | wc -l)
+          jq -n --argjson error_blocks "$error_handling" '{"error_handling_count": $error_blocks}'
+        parse_json: true
+        output: "final_error_scan"
+        timeout: 120
+      
+      - id: "generate-comparison-report"
+        agent: "foundation:zen-architect"
+        depends_on: ["recount-file-inventory", "rescan-mocks", "rescan-todos", "rescan-error-handling", "run-tests-after-fixes"]
+        prompt: |
+          REMEDIATION COMPLETE - GENERATE BEFORE/AFTER REPORT
+          
+          ## Initial State
+          - File inventory: {{file_inventory}}
+          - Mocks: {{initial_mock_scan}}
+          - TODOs/Stubs: {{initial_incomplete_scan}}
+          - Error handling: {{initial_error_scan}}
+          - Tests: {{initial_test_results}}
+          
+          ## Final State
+          - File inventory: {{final_file_inventory}}
+          - Mocks: {{final_mock_scan}}
+          - TODOs/Stubs: {{final_incomplete_scan}}
+          - Error handling: {{final_error_scan}}
+          - Tests: {{post_fix_test_results}}
+          
+          ## Fixes Applied
+          {{fix_results}}
+          
+          Generate comprehensive before/after report:
+          
+          # Implementation Verification - Before/After Comparison
+          
+          ## Summary
+          - Overall result: IMPROVED / UNCHANGED / REGRESSED
+          - Production ready: YES / NO
+          
+          ## Metrics Comparison
+          | Metric | Before | After | Delta |
+          |--------|--------|-------|-------|
+          | Test files | X | Y | +Z |
+          | Mock count | X | Y | -Z |
+          | TODO count | X | Y | -Z |
+          | Stub count | X | Y | -Z |
+          | Error handling | X | Y | +Z |
+          | Tests passing | X | Y | +Z |
+          
+          ## Fixes Applied
+          Summary of what was fixed.
+          
+          ## Remaining Gaps
+          What still needs manual attention.
+          
+          ## Regression Check
+          ⚠️ Flag if new mocks/TODOs appeared (RED FLAG).
+          
+          ## Confidence Assessment
+          - Before: [X/10]
+          - After: [Y/10]
+          - Production ready: [YES/NO with reasoning]
+          
+          Format as professional report.
+        output: "comparison_report"
+        timeout: 300
+      
+      - id: "save-comparison-report"
+        bash: |
+          cd {{target_path}} || exit 1
+          cat > VERIFICATION_REPORT_COMPARISON.md << 'EOF'
+          {{comparison_report}}
+          EOF
+          echo "Comparison report saved to {{target_path}}/VERIFICATION_REPORT_COMPARISON.md"
+        timeout: 30
+
+# Philosophy:
+# - Same forensic verification as antagonistic-verification.yaml
+# - Staged workflow with human approval before automated changes
+# - Iterative fix loop with safety limits
+# - Before/after comparison to validate improvements
+# - Regression detection (new mocks = RED FLAG)
