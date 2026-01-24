@@ -1,0 +1,357 @@
+---
+name: "webword-task-iteration-loop"
+version: "1.0.0"
+description: |
+  Master coordinator recipe for WebWord implementation tasks.
+  
+  Iterates through task list, spawning FRESH sessions for each task:
+  - Builder session (implement)
+  - Validator session (antagonistic review)
+  - Retries on failure (up to max_retries)
+  
+  Uses webword-pm tool for state tracking and git commits.
+  
+  Key features:
+  - Fresh context per task (no context overflow)
+  - Antagonistic validation (builder vs validator)
+  - Resumable (tracks state in webword-pm)
+  - Parallel task execution (optional)
+  - Automatic git commits on success
+
+author: "WebWord Development Team"
+tags: ["iteration", "coordination", "task-management"]
+
+context:
+  # Task selection
+  task_file: "new-features-tasks.yaml"  # or master-tasks.yaml
+  task_filter: ""  # e.g., "phase-2.6.1" to filter by phase
+  max_tasks: 10  # Process N tasks per run (-1 or 0 = unlimited, all tasks)
+  start_from_task: ""  # Resume from specific task ID
+  
+  # Working directory
+  project_root: "/mnt/c/ANext/wordbs"
+  
+  # Retry configuration
+  max_retries: 2
+  
+  # Validation mode
+  validation_enabled: true
+  validation_strictness: "moderate"  # strict | moderate | lenient
+  
+  # Git integration
+  auto_commit: true
+  commit_prefix: "feat"  # feat | fix | refactor
+  
+  # Shadow environment (optional)
+  use_shadow_env: false  # Set true when node config is fixed
+  shadow_env_name: "webword-dev"
+
+stages:
+  - name: "task-iteration"
+    description: "Iterate through task list with fresh sessions per task"
+    
+    steps:
+      # Step 1: Load task list from file
+      - id: "load-task-list"
+        agent: "foundation:file-ops"
+        prompt: |
+          ## Task: Load Task List
+          
+          Read task list from {{project_root}}/{{task_file}}
+          
+          Extract:
+          - All tasks with status: "not_started" or "failed"
+          - Filter by phase if specified: {{task_filter}}
+          - If max_tasks is -1 or 0: return ALL tasks (unlimited)
+          - Otherwise limit to first {{max_tasks}} tasks
+          - If start_from_task specified: {{start_from_task}}, start from that ID
+          
+          Return JSON:
+          ```json
+          {
+            "tasks": [
+              {
+                "id": "task-id",
+                "name": "task name",
+                "phase": "phase-name",
+                "status": "not_started",
+                "estimated_hours": 4
+              }
+            ],
+            "total_tasks": 0,
+            "total_estimated_hours": 0
+          }
+          ```
+        output: "task_list"
+        parse_json: true
+        timeout: 120
+      
+      # Step 2: Process each task with fresh builder session
+      - id: "process-tasks"
+        foreach: "{{task_list.tasks}}"
+        as: "task"
+        parallel: false  # Set true for parallel (risky without proper isolation)
+        collect: "task_results"
+        
+        steps:
+          # Sub-step 2a: Start task in webword-pm
+          - id: "start-task"
+            agent: "foundation:file-ops"
+            prompt: |
+              ## Task: Start Task {{task.id}} in Project Manager
+              
+              Run:
+              ```bash
+              cd {{project_root}}
+              uvx --from ./tools/webword-pm webword-pm start {{task.id}}
+              ```
+              
+              This creates session context and marks task as in-progress.
+              
+              Return the task session directory path.
+            output: "task_session_dir"
+            timeout: 60
+          
+          # Sub-step 2b: Spawn FRESH builder session (via task tool)
+          - id: "builder-session"
+            type: "agent"
+            agent: "webword:task-builder"
+            inherit_context: "none"  # CRITICAL: Fresh context
+            prompt: |
+              ## Task: Implement {{task.id}} - {{task.name}}
+              
+              **Working Directory:** {{project_root}}
+              **Task ID:** {{task.id}}
+              **Estimated Hours:** {{task.estimated_hours}}
+              
+              **Your Mission:**
+              1. Read task details from webword-pm: `uvx --from ./tools/webword-pm webword-pm info {{task.id}}`
+              2. Read referenced design documents (paths in task details)
+              3. Implement the task according to spec
+              4. Write comprehensive tests
+              5. Run tests locally
+              6. Create checkpoint: `uvx --from ./tools/webword-pm webword-pm checkpoint "Implemented {{task.name}}"`
+              
+              **Quality Requirements:**
+              - Follow TypeScript best practices
+              - Add type annotations
+              - Include JSDoc comments
+              - Write real tests (not stubs)
+              - Verify tests pass
+              
+              **Output Required:**
+              Return JSON with:
+              ```json
+              {
+                "status": "success" | "failed",
+                "files_created": ["path/to/file"],
+                "files_modified": ["path/to/file"],
+                "tests_written": ["path/to/test"],
+                "tests_passed": true/false,
+                "implementation_notes": "summary of what was implemented",
+                "blockers": "any issues encountered (empty if none)"
+              }
+              ```
+            output: "builder_result"
+            parse_json: true
+            timeout: 3600  # 1 hour per task
+            on_error: "continue"  # Continue to next task on failure
+          
+          # Sub-step 2c: Spawn FRESH validator session (antagonistic)
+          - id: "validator-session"
+            condition: "{{validation_enabled}} == true && {{builder_result.status}} == 'success'"
+            type: "agent"
+            agent: "webword:task-validator"
+            inherit_context: "none"  # CRITICAL: Fresh context
+            prompt: |
+              ## Task: ANTAGONISTIC Validation of {{task.id}}
+              
+              **Your Role:** You are a senior engineer reviewing code by a junior developer.
+              Your job is to find problems, not to approve.
+              
+              **Working Directory:** {{project_root}}
+              **Task ID:** {{task.id}}
+              
+              **What to Validate:**
+              
+              1. **Implementation Quality**
+                 - Read the implementation files from builder result
+                 - Check for TypeScript errors: `npm run typecheck`
+                 - Check for lint issues: `npm run lint`
+                 - Verify code follows patterns in existing codebase
+                 - Look for edge cases not handled
+              
+              2. **Test Quality (CRITICAL)**
+                 - Read test files
+                 - Run tests: `npm test -- {{test_file_pattern}}`
+                 - Verify tests are REAL (not just `expect(true).toBe(true)`)
+                 - Check for missing test cases (happy path, edge cases, errors)
+                 - Verify test assertions are meaningful
+              
+              3. **Design Adherence**
+                 - Read task details and design docs
+                 - Verify implementation matches design intent
+                 - Check if requirements are fully met
+              
+              4. **Integration**
+                 - Check if new code integrates properly with existing code
+                 - Look for breaking changes
+                 - Verify imports/exports are correct
+              
+              **Validation Strictness:** {{validation_strictness}}
+              - strict: Block on any issues
+              - moderate: Block on critical issues only
+              - lenient: Block on showstoppers only
+              
+              **Output Required:**
+              Return JSON with:
+              ```json
+              {
+                "verdict": "PASS" | "FAIL",
+                "confidence": 0-100,
+                "critical_issues": [
+                  {
+                    "file": "path/to/file",
+                    "issue": "description",
+                    "severity": "critical | high | medium | low"
+                  }
+                ],
+                "test_quality_score": 0-100,
+                "recommendations": "improvements for next iteration",
+                "summary": "2-3 sentence assessment"
+              }
+              ```
+              
+              **Be honest.** If tests are stubs, say so. If code is incomplete, say so.
+            output: "validator_result"
+            parse_json: true
+            timeout: 1800  # 30 minutes for validation
+            on_error: "continue"
+          
+          # Sub-step 2d: Handle validation result
+          - id: "handle-validation"
+            agent: "foundation:file-ops"
+            prompt: |
+              ## Task: Process Validation Result
+              
+              **Builder Result:** {{builder_result}}
+              **Validator Result:** {{validator_result}}
+              
+              **Decision Logic:**
+              
+              If validator verdict is PASS:
+              - Mark task complete: `uvx --from ./tools/webword-pm webword-pm complete`
+              - Commit changes: `uvx --from ./tools/webword-pm webword-pm push`
+              - Return success
+              
+              If validator verdict is FAIL:
+              - Check retry count (current: {{task.retry_count || 0}}, max: {{max_retries}})
+              - If retries remaining:
+                  - Mark task for retry: `uvx --from ./tools/webword-pm webword-pm pause --notes "Validation failed: {{validator_result.summary}}"`
+                  - Return retry_needed
+              - If no retries remaining:
+                  - Mark task failed: `uvx --from ./tools/webword-pm webword-pm fail --reason "{{validator_result.summary}}"`
+                  - Return failed
+              
+              If builder failed:
+              - Mark task failed: `uvx --from ./tools/webword-pm webword-pm fail --reason "{{builder_result.blockers}}"`
+              - Return failed
+              
+              Return JSON:
+              ```json
+              {
+                "task_id": "{{task.id}}",
+                "final_status": "completed" | "retry_needed" | "failed",
+                "validator_verdict": "{{validator_result.verdict}}",
+                "critical_issues_count": 0,
+                "next_action": "description"
+              }
+              ```
+            output: "task_completion_result"
+            parse_json: true
+            timeout: 300
+      
+      # Step 3: Generate iteration summary
+      - id: "generate-summary"
+        agent: "foundation:file-ops"
+        prompt: |
+          ## Task: Generate Iteration Summary
+          
+          **Task Results:** {{task_results}}
+          
+          Create summary report:
+          
+          # WebWord Implementation Iteration Summary
+          
+          **Date:** <current date>
+          **Tasks Processed:** {{task_list.total_tasks}}
+          **Estimated Hours:** {{task_list.total_estimated_hours}}
+          
+          ## Results
+          
+          - ✅ Completed: <count of completed>
+          - 🔄 Retry Needed: <count of retry_needed>
+          - ❌ Failed: <count of failed>
+          
+          ## Task Details
+          
+          For each task:
+          ### {{task.id}} - {{task.name}}
+          - Status: {{task_completion_result.final_status}}
+          - Validator Verdict: {{validator_result.verdict}}
+          - Issues: {{validator_result.critical_issues_count}}
+          - Next Action: {{task_completion_result.next_action}}
+          
+          ## Recommendations
+          
+          <analyze patterns in failures/issues>
+          
+          ## Next Steps
+          
+          1. Review failed tasks manually
+          2. Re-run loop for retry_needed tasks
+          3. Continue to next batch
+          
+          Save to: {{project_root}}/.amplifier/iteration-reports/report-<timestamp>.md
+        output: "iteration_summary"
+        timeout: 300
+
+# Output to calling context (if this is a sub-recipe)
+output:
+  summary: "{{iteration_summary}}"
+  tasks_completed: "{{task_results}}"
+  total_tasks: "{{task_list.total_tasks}}"
+
+metadata:
+  estimated_runtime: "1-4 hours (depends on max_tasks)"
+  resumable: true
+  
+  agents_required:
+    - "webword:task-builder (implements tasks)"
+    - "webword:task-validator (antagonistic review)"
+    - "foundation:file-ops (coordination)"
+  
+  key_features:
+    - "Fresh context per task (no overflow)"
+    - "Antagonistic validation"
+    - "Retry logic with limits"
+    - "State tracking via webword-pm"
+    - "Automatic git commits"
+    - "Batch processing (configurable max_tasks)"
+  
+  usage:
+    example: |
+      # Process 10 tasks from new-features-tasks.yaml
+      amplifier tool invoke recipes operation=execute \
+        recipe_path=.amplifier/recipes/task-iteration-loop.yaml \
+        context='{"task_file": "new-features-tasks.yaml", "max_tasks": 10}'
+      
+      # Resume from specific task
+      amplifier tool invoke recipes operation=execute \
+        recipe_path=.amplifier/recipes/task-iteration-loop.yaml \
+        context='{"start_from_task": "2.6.1.3", "max_tasks": 5}'
+      
+      # Strict validation mode
+      amplifier tool invoke recipes operation=execute \
+        recipe_path=.amplifier/recipes/task-iteration-loop.yaml \
+        context='{"validation_strictness": "strict", "max_tasks": 3}'
