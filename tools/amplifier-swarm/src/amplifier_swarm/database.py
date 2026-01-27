@@ -33,34 +33,34 @@ class TaskDatabase:
                     acceptance_criteria TEXT,
                     files TEXT,  -- JSON array
                     design_docs TEXT,  -- JSON array
-                    
+
                     -- Worker tracking
                     worker_id TEXT,
                     claimed_at TIMESTAMP,
                     started_at TIMESTAMP,
                     completed_at TIMESTAMP,
-                    
+
                     -- Session tracking
                     builder_session_id TEXT,
                     validator_session_id TEXT,
-                    
+
                     -- Retry handling
                     retry_count INTEGER DEFAULT 0,
                     max_retries INTEGER DEFAULT 2,
                     last_error TEXT,
-                    
+
                     -- Dependencies
                     dependencies TEXT,  -- Comma-separated task IDs that must complete before this task
-                    
+
                     -- Results (JSON)
                     builder_result TEXT,
                     validator_result TEXT,
-                    
+
                     -- Timestamps
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
-                
+
                 CREATE TABLE IF NOT EXISTS workers (
                     worker_id TEXT PRIMARY KEY,
                     pid INTEGER NOT NULL,
@@ -71,10 +71,11 @@ class TaskDatabase:
                     tasks_completed INTEGER DEFAULT 0,
                     tasks_failed INTEGER DEFAULT 0,
                     current_task_id TEXT,
-                    
+                    orchestrator_pid INTEGER,
+
                     FOREIGN KEY(current_task_id) REFERENCES tasks(id)
                 );
-                
+
                 CREATE TABLE IF NOT EXISTS execution_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_id TEXT NOT NULL,
@@ -83,10 +84,10 @@ class TaskDatabase:
                     message TEXT,
                     data TEXT,  -- JSON
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
+
                     FOREIGN KEY(task_id) REFERENCES tasks(id)
                 );
-                
+
                 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
                 CREATE INDEX IF NOT EXISTS idx_tasks_worker ON tasks(worker_id);
                 CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority DESC, created_at ASC);
@@ -160,9 +161,9 @@ class TaskDatabase:
                 # Atomically claim it
                 cursor = conn.execute(
                     """
-                    UPDATE tasks 
-                    SET status = 'claimed', 
-                        worker_id = ?, 
+                    UPDATE tasks
+                    SET status = 'claimed',
+                        worker_id = ?,
                         claimed_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ? AND status = 'not_started'
@@ -346,6 +347,52 @@ class TaskDatabase:
                     params,
                 )
 
+    def kill_task_sessions(self, task_id: str) -> dict:
+        """Kill Amplifier sessions associated with a task.
+
+        Returns:
+            dict with builder_killed, validator_killed status
+        """
+        import subprocess
+
+        task = self.get_task(task_id)
+        if not task:
+            logger.warning(f"Task {task_id} not found")
+            return {"builder_killed": False, "validator_killed": False}
+
+        result = {"builder_killed": False, "validator_killed": False}
+
+        # Kill builder session
+        if task.get("builder_session_id"):
+            try:
+                # Use amplifier CLI to kill session
+                subprocess.run(
+                    ["amplifier", "session", "kill", task["builder_session_id"]],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                result["builder_killed"] = True
+                logger.info(f"Killed builder session {task['builder_session_id']}")
+            except Exception as e:
+                logger.error(f"Failed to kill builder session: {e}")
+
+        # Kill validator session
+        if task.get("validator_session_id"):
+            try:
+                subprocess.run(
+                    ["amplifier", "session", "kill", task["validator_session_id"]],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                result["validator_killed"] = True
+                logger.info(f"Killed validator session {task['validator_session_id']}")
+            except Exception as e:
+                logger.error(f"Failed to kill validator session: {e}")
+
+        return result
+
     def add_task_dependency(self, task_id: str, depends_on_task_id: str):
         """Mark that task_id depends on another task completing first.
 
@@ -383,7 +430,7 @@ class TaskDatabase:
         with self.connection() as conn:
             cursor = conn.execute(
                 """
-                SELECT 
+                SELECT
                     t1.id,
                     t1.name,
                     t1.dependencies,
@@ -412,7 +459,7 @@ class TaskDatabase:
         with self.connection() as conn:
             cursor = conn.execute(
                 """
-                SELECT 
+                SELECT
                     status,
                     COUNT(*) as count,
                     SUM(estimated_hours) as total_hours
@@ -445,22 +492,31 @@ class TaskDatabase:
     # Worker Operations
     # -------------------------------------------------------------------------
 
-    def register_worker(self, worker_id: str, pid: int, hostname: str):
-        """Register a new worker."""
+    def register_worker(self, worker_id: str, pid: int, hostname: str, orchestrator_pid: int | None = None):
+        """Register a new worker.
+
+        Args:
+            worker_id: Unique worker identifier
+            pid: Worker process ID
+            hostname: Machine hostname
+            orchestrator_pid: PID of orchestrator process (for emergency stop)
+        """
         with self.connection() as conn:
             conn.execute(
                 """
-                INSERT INTO workers (worker_id, pid, hostname, status)
-                VALUES (?, ?, ?, 'active')
+                INSERT INTO workers (worker_id, pid, hostname, orchestrator_pid, status)
+                VALUES (?, ?, ?, ?, 'active')
                 ON CONFLICT(worker_id) DO UPDATE SET
                     pid = excluded.pid,
                     hostname = excluded.hostname,
+                    orchestrator_pid = excluded.orchestrator_pid,
                     started_at = CURRENT_TIMESTAMP,
                     last_heartbeat = CURRENT_TIMESTAMP,
                     status = 'active'
                 """,
-                (worker_id, pid, hostname),
+                (worker_id, pid, hostname, orchestrator_pid),
             )
+            logger.info(f"Registered worker {worker_id} (PID {pid}, orchestrator PID {orchestrator_pid})")
 
     def heartbeat(self, worker_id: str, current_task_id: str | None = None):
         """Update worker heartbeat."""

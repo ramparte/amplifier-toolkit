@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -26,6 +27,7 @@ class SwarmWorker:
         validator_agent: str,
         validation_enabled: bool = True,
         heartbeat_interval: int = 30,
+        orchestrator_pid: int | None = None,
     ):
         self.db_path = db_path
         self.worker_id = worker_id
@@ -34,6 +36,7 @@ class SwarmWorker:
         self.validator_agent = validator_agent
         self.validation_enabled = validation_enabled
         self.heartbeat_interval = heartbeat_interval
+        self.orchestrator_pid = orchestrator_pid
 
         self.db = TaskDatabase(db_path)
         self.shutdown_requested = False
@@ -57,7 +60,7 @@ class SwarmWorker:
         logger.info(f"Worker {self.worker_id} starting (PID: {pid}, host: {hostname})")
 
         # Register worker
-        self.db.register_worker(self.worker_id, pid, hostname)
+        self.db.register_worker(self.worker_id, pid, hostname, self.orchestrator_pid)
 
         try:
             self._work_loop()
@@ -164,6 +167,15 @@ class SwarmWorker:
                 timeout=3600,  # 1 hour
             )
 
+            # Store builder session_id
+            if result.get("session_id"):
+                self.db.update_task_sessions(
+                    task_id=task["id"],
+                    builder_session_id=result["session_id"],
+                    validator_session_id=None,
+                )
+                logger.info(f"Stored builder session_id for task {task['id']}: {result['session_id']}")
+
             # Try to parse JSON from output
             try:
                 return json.loads(result["output"])
@@ -211,6 +223,24 @@ class SwarmWorker:
                 prompt=prompt,
                 timeout=1800,  # 30 minutes
             )
+
+            # Store builder session_id
+            if result.get("session_id"):
+                self.db.update_task_sessions(
+                    task_id=task["id"],
+                    builder_session_id=result["session_id"],
+                    validator_session_id=None,
+                )
+                logger.info(f"Stored builder session_id for task {task['id']}: {result['session_id']}")
+
+            # Store validator session_id
+            if result.get("session_id"):
+                self.db.update_task_sessions(
+                    task_id=task["id"],
+                    builder_session_id=None,  # Keep existing
+                    validator_session_id=result["session_id"],
+                )
+                logger.info(f"Stored validator session_id for task {task['id']}: {result['session_id']}")
 
             # Try to parse JSON from output
             try:
@@ -277,13 +307,20 @@ class SwarmWorker:
                 env=os.environ.copy(),
             )
 
-            # Parse session_id from output if available
+            # Parse session_id from JSON response
             session_id = None
             try:
+                # The task tool returns JSON with session_id
                 output_data = json.loads(result.stdout)
                 session_id = output_data.get("session_id")
-            except (json.JSONDecodeError, KeyError):
-                pass
+                logger.info(f"Captured session_id: {session_id}")
+            except (json.JSONDecodeError, KeyError, AttributeError) as e:
+                logger.warning(f"Could not parse session_id from output: {e}")
+                # Try to extract from text output as fallback
+                match = re.search(r'session[_-]id["\s:]+([a-f0-9-]+)', result.stdout, re.IGNORECASE)
+                if match:
+                    session_id = match.group(1)
+                    logger.info(f"Extracted session_id from text: {session_id}")
 
             return {
                 "output": result.stdout,
@@ -419,6 +456,9 @@ def main():
     parser.add_argument("--project-root", type=Path, required=True, help="Project root directory")
     parser.add_argument("--builder-agent", required=True, help="Builder agent name")
     parser.add_argument("--validator-agent", required=True, help="Validator agent name")
+    parser.add_argument(
+        "--orchestrator-pid", type=int, default=None, help="Orchestrator process ID (for emergency stop)"
+    )
     parser.add_argument("--no-validation", action="store_true", help="Disable validation")
     parser.add_argument("--verbose", action="store_true", help="Verbose logging")
 
@@ -436,6 +476,7 @@ def main():
         builder_agent=args.builder_agent,  # Pass agent name
         validator_agent=args.validator_agent,  # Pass agent name
         validation_enabled=not args.no_validation,
+        orchestrator_pid=args.orchestrator_pid,
     )
 
     worker.start()

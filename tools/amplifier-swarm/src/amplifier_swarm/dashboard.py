@@ -1,16 +1,13 @@
 """Web dashboard for monitoring and controlling the swarm."""
 
 import asyncio
-import json
 import logging
 import os
 import signal
 from pathlib import Path
-from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 
 from .database import TaskDatabase
 
@@ -20,7 +17,7 @@ logger = logging.getLogger(__name__)
 class DashboardServer:
     """FastAPI server for swarm dashboard."""
 
-    def __init__(self, db_path: Path, static_dir: Optional[Path] = None):
+    def __init__(self, db_path: Path, static_dir: Path | None = None):
         self.db_path = db_path
         self.db = TaskDatabase(db_path)
         self.app = FastAPI(title="Amplifier Swarm Dashboard")
@@ -37,7 +34,7 @@ class DashboardServer:
         self._setup_routes()
 
         # Background task for broadcasting updates
-        self.update_task: Optional[asyncio.Task] = None
+        self.update_task: asyncio.Task | None = None
 
     def _setup_routes(self):
         """Set up API routes."""
@@ -55,7 +52,7 @@ class DashboardServer:
             """Get overall system status."""
             summary = self.db.get_tasks_summary()
             workers = self.db.get_all_workers()
-            
+
             return {
                 "tasks": summary,
                 "workers": {
@@ -66,7 +63,7 @@ class DashboardServer:
             }
 
         @self.app.get("/api/tasks")
-        async def get_tasks(status: Optional[str] = None):
+        async def get_tasks(status: str | None = None):
             """Get all tasks, optionally filtered by status."""
             tasks = self.db.get_all_tasks(status=status)
             return {"tasks": tasks}
@@ -77,9 +74,9 @@ class DashboardServer:
             task = self.db.get_task(task_id)
             if not task:
                 raise HTTPException(status_code=404, detail="Task not found")
-            
+
             log = self.db.get_task_log(task_id)
-            
+
             return {
                 "task": task,
                 "log": log,
@@ -103,13 +100,10 @@ class DashboardServer:
             task = self.db.get_task(task_id)
             if not task:
                 raise HTTPException(status_code=404, detail="Task not found")
-            
+
             if task["status"] not in ["failed", "completed"]:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Cannot retry task with status: {task['status']}"
-                )
-            
+                raise HTTPException(status_code=400, detail=f"Cannot retry task with status: {task['status']}")
+
             # Reset task to not_started
             with self.db.connection() as conn:
                 conn.execute(
@@ -128,7 +122,7 @@ class DashboardServer:
                     """,
                     (task_id,),
                 )
-                
+
                 self.db.log_event(
                     conn,
                     task_id=task_id,
@@ -136,117 +130,115 @@ class DashboardServer:
                     event_type="manual_retry",
                     message="Task manually reset for retry via dashboard",
                 )
-            
+
             await self._broadcast_update()
-            
+
             return {"success": True, "message": f"Task {task_id} reset for retry"}
 
         @self.app.post("/api/tasks/{task_id}/kill")
-        async def kill_task_session(task_id: str):
-            """Kill the Amplifier sessions for a task."""
+        async def kill_task(task_id: str):
+            """Kill a running task by terminating its sessions and worker."""
             task = self.db.get_task(task_id)
             if not task:
-                raise HTTPException(status_code=404, detail="Task not found")
-            
+                raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
             if task["status"] not in ["claimed", "in_progress"]:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Cannot kill task with status: {task['status']}"
-                )
-            
-            # Try to kill the Amplifier processes
-            killed = []
-            errors = []
-            
-            # Kill builder session
-            if task["builder_session_id"]:
-                try:
-                    # TODO: Implement actual session killing
-                    # For now, we'll just mark it as killed
-                    killed.append(f"builder:{task['builder_session_id']}")
-                except Exception as e:
-                    errors.append(f"builder: {str(e)}")
-            
-            # Kill validator session
-            if task["validator_session_id"]:
-                try:
-                    killed.append(f"validator:{task['validator_session_id']}")
-                except Exception as e:
-                    errors.append(f"validator: {str(e)}")
-            
+                raise HTTPException(status_code=400, detail=f"Task is {task['status']}, cannot kill")
+
+            result = {"sessions_killed": False, "worker_killed": False, "method": None}
+
+            # First try to kill sessions gracefully
+            try:
+                session_result = self.db.kill_task_sessions(task_id)
+                if session_result["builder_killed"] or session_result["validator_killed"]:
+                    result["sessions_killed"] = True
+                    result["method"] = "session_kill"
+                    logger.info(f"Killed sessions for task {task_id}")
+            except Exception as e:
+                logger.warning(f"Failed to kill sessions: {e}")
+
+            # Then kill the worker process (existing logic)
+            worker_id = task.get("worker_id")
+            if worker_id:
+                workers = self.db.get_all_workers()
+                for worker in workers:
+                    if worker["worker_id"] == worker_id:
+                        try:
+                            import psutil
+
+                            proc = psutil.Process(worker["pid"])
+                            proc.terminate()
+                            result["worker_killed"] = True
+                            result["method"] = "worker_terminate"
+                            logger.info(f"Killed worker {worker_id} (PID {worker['pid']})")
+                        except Exception as e:
+                            logger.error(f"Failed to kill worker: {e}")
+
             # Mark task as failed
             self.db.fail_task(
-                task_id,
-                task["worker_id"],
-                "Task killed via dashboard",
+                task_id=task_id,
+                worker_id=worker_id or "dashboard",
+                error="Killed by user",
             )
-            
+
             await self._broadcast_update()
-            
-            return {
-                "success": True,
-                "killed": killed,
-                "errors": errors,
-                "message": f"Task {task_id} killed and marked as failed",
-            }
+
+            return result
 
         @self.app.post("/api/emergency-stop")
         async def emergency_stop():
-            """Send emergency stop signal to orchestrator."""
-            # Find orchestrator process and send SIGUSR1
-            try:
-                # Get all workers
-                workers = self.db.get_all_workers()
-                
-                # Set all active workers to stopping
-                with self.db.connection() as conn:
-                    for worker in workers:
-                        if worker["status"] == "active":
-                            conn.execute(
-                                "UPDATE workers SET status = 'stopping' WHERE worker_id = ?",
-                                (worker["worker_id"],),
-                            )
-                
-                # Try to find and signal orchestrator process
-                # This is a bit hacky - we look for the parent process of workers
-                orchestrator_pid = None
-                for worker in workers:
-                    try:
-                        import psutil
-                        proc = psutil.Process(worker["pid"])
-                        parent = proc.parent()
-                        if parent and "amplifier-swarm" in " ".join(parent.cmdline()):
-                            orchestrator_pid = parent.pid
-                            break
-                    except Exception:
-                        pass
-                
-                if orchestrator_pid:
-                    logger.warning(f"Sending SIGUSR1 to orchestrator (PID {orchestrator_pid})")
-                    os.kill(orchestrator_pid, signal.SIGUSR1)
-                    message = f"Emergency stop signal sent to orchestrator (PID {orchestrator_pid})"
-                else:
-                    message = "Workers marked for stopping, but could not find orchestrator process"
-                
-                await self._broadcast_update()
-                
-                return {"success": True, "message": message}
-                
-            except Exception as e:
-                logger.error(f"Emergency stop failed: {e}", exc_info=True)
-                raise HTTPException(status_code=500, detail=f"Emergency stop failed: {str(e)}")
+            """Emergency stop - kill orchestrator and all workers."""
+            import psutil
+
+            killed = {"orchestrator": False, "workers": []}
+
+            # Get orchestrator PID from any worker
+            workers = self.db.get_all_workers()
+            orchestrator_pid = None
+
+            for worker in workers:
+                if worker.get("orchestrator_pid"):
+                    orchestrator_pid = worker["orchestrator_pid"]
+                    break
+
+            # Kill all workers first
+            for worker in workers:
+                try:
+                    proc = psutil.Process(worker["pid"])
+                    proc.kill()
+                    killed["workers"].append(worker["worker_id"])
+                    logger.info(f"Killed worker {worker['worker_id']} (PID {worker['pid']})")
+                except Exception as e:
+                    logger.warning(f"Failed to kill worker {worker['worker_id']}: {e}")
+
+            # Kill orchestrator
+            if orchestrator_pid:
+                try:
+                    proc = psutil.Process(orchestrator_pid)
+                    proc.kill()
+                    killed["orchestrator"] = True
+                    logger.info(f"Killed orchestrator (PID {orchestrator_pid})")
+                except Exception as e:
+                    logger.error(f"Failed to kill orchestrator: {e}")
+            else:
+                logger.warning("No orchestrator PID found in database")
+
+            await self._broadcast_update()
+
+            return killed
 
         @self.app.post("/api/graceful-shutdown")
         async def graceful_shutdown():
             """Send graceful shutdown signal to orchestrator."""
             try:
                 workers = self.db.get_all_workers()
-                
+
                 # Find orchestrator process
                 orchestrator_pid = None
                 for worker in workers:
                     try:
                         import psutil
+
                         proc = psutil.Process(worker["pid"])
                         parent = proc.parent()
                         if parent and "amplifier-swarm" in " ".join(parent.cmdline()):
@@ -254,18 +246,18 @@ class DashboardServer:
                             break
                     except Exception:
                         pass
-                
+
                 if orchestrator_pid:
                     logger.info(f"Sending SIGTERM to orchestrator (PID {orchestrator_pid})")
                     os.kill(orchestrator_pid, signal.SIGTERM)
                     message = f"Graceful shutdown signal sent to orchestrator (PID {orchestrator_pid})"
                 else:
                     message = "Could not find orchestrator process"
-                
+
                 await self._broadcast_update()
-                
+
                 return {"success": True, "message": message}
-                
+
             except Exception as e:
                 logger.error(f"Graceful shutdown failed: {e}", exc_info=True)
                 raise HTTPException(status_code=500, detail=f"Graceful shutdown failed: {str(e)}")
@@ -275,17 +267,17 @@ class DashboardServer:
             """WebSocket endpoint for real-time updates."""
             await websocket.accept()
             self.active_connections.append(websocket)
-            
+
             try:
                 # Send initial status
                 status = await get_status()
                 await websocket.send_json({"type": "status", "data": status})
-                
+
                 # Keep connection alive and listen for messages
                 while True:
                     # Just keep the connection alive
                     await websocket.receive_text()
-                    
+
             except WebSocketDisconnect:
                 self.active_connections.remove(websocket)
             except Exception as e:
@@ -297,11 +289,11 @@ class DashboardServer:
         """Broadcast status update to all connected WebSocket clients."""
         if not self.active_connections:
             return
-        
+
         # Get current status
         summary = self.db.get_tasks_summary()
         workers = self.db.get_all_workers()
-        
+
         status = {
             "tasks": summary,
             "workers": {
@@ -310,7 +302,7 @@ class DashboardServer:
                 "workers": workers,
             },
         }
-        
+
         # Send to all connections
         dead_connections = []
         for connection in self.active_connections:
@@ -319,7 +311,7 @@ class DashboardServer:
             except Exception as e:
                 logger.warning(f"Failed to send to WebSocket: {e}")
                 dead_connections.append(connection)
-        
+
         # Remove dead connections
         for connection in dead_connections:
             self.active_connections.remove(connection)
@@ -344,24 +336,25 @@ class DashboardServer:
                 pass
 
 
-def create_app(db_path: Path, static_dir: Optional[Path] = None) -> FastAPI:
+def create_app(db_path: Path, static_dir: Path | None = None) -> FastAPI:
     """Create and configure the FastAPI app."""
     server = DashboardServer(db_path, static_dir)
-    
+
     @server.app.on_event("startup")
     async def startup():
         await server.start()
-    
+
     @server.app.on_event("shutdown")
     async def shutdown():
         await server.stop()
-    
+
     return server.app
 
 
 def main():
     """Entry point for running dashboard server."""
     import argparse
+
     import uvicorn
 
     parser = argparse.ArgumentParser(description="Amplifier Swarm Dashboard")

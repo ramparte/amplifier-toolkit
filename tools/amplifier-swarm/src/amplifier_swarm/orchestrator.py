@@ -4,13 +4,9 @@ import logging
 import multiprocessing as mp
 import os
 import signal
-import socket
 import sys
 import time
 from pathlib import Path
-from typing import Optional
-
-import psutil
 
 from .database import TaskDatabase
 from .worker import SwarmWorker
@@ -66,9 +62,7 @@ class SwarmOrchestrator:
 
     def start(self):
         """Start the orchestrator and worker pool."""
-        logger.info(
-            f"Orchestrator starting with {self.num_workers} worker(s) (serial mode: {self.num_workers == 1})"
-        )
+        logger.info(f"Orchestrator starting with {self.num_workers} worker(s) (serial mode: {self.num_workers == 1})")
         logger.info(f"Project: {self.project_root}")
         logger.info(f"Builder: {self.builder_agent}, Validator: {self.validator_agent}")
         logger.info(f"Validation: {'enabled' if self.validation_enabled else 'disabled'}")
@@ -93,12 +87,15 @@ class SwarmOrchestrator:
     def _spawn_workers(self):
         """Spawn the worker processes."""
         for i in range(self.num_workers):
-            worker_id = f"worker-{i+1}-{int(time.time())}"
+            worker_id = f"worker-{i + 1}-{int(time.time())}"
             self._spawn_worker(worker_id)
 
     def _spawn_worker(self, worker_id: str):
         """Spawn a single worker process."""
         logger.info(f"Spawning worker: {worker_id}")
+
+        # Get orchestrator PID to pass to worker
+        orchestrator_pid = os.getpid()
 
         # Use multiprocessing for proper isolation
         process = mp.Process(
@@ -110,6 +107,7 @@ class SwarmOrchestrator:
                 self.builder_agent,
                 self.validator_agent,
                 self.validation_enabled,
+                orchestrator_pid,
             ),
             name=worker_id,
         )
@@ -227,7 +225,7 @@ class SwarmOrchestrator:
 
         # Send SIGTERM to all workers
         for worker_id, process in self.workers.items():
-            if process.is_alive():
+            if process.is_alive() and process.pid is not None:
                 logger.debug(f"Sending SIGTERM to {worker_id} (PID {process.pid})")
                 try:
                     os.kill(process.pid, signal.SIGTERM)
@@ -293,6 +291,7 @@ def _worker_entry_point(
     builder_agent: str,
     validator_agent: str,
     validation_enabled: bool,
+    orchestrator_pid: int,
 ):
     """Entry point for worker process (called via multiprocessing)."""
     # Set up logging for worker process
@@ -308,6 +307,7 @@ def _worker_entry_point(
         builder_agent=builder_agent,
         validator_agent=validator_agent,
         validation_enabled=validation_enabled,
+        orchestrator_pid=orchestrator_pid,
     )
 
     try:
