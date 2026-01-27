@@ -6,10 +6,8 @@ import os
 import signal
 import socket
 import subprocess
-import sys
 import time
 from pathlib import Path
-from typing import Optional
 
 from .database import TaskDatabase
 
@@ -39,7 +37,7 @@ class SwarmWorker:
 
         self.db = TaskDatabase(db_path)
         self.shutdown_requested = False
-        self.current_task_id: Optional[str] = None
+        self.current_task_id: str | None = None
         self.last_heartbeat = 0.0
 
         # Register signal handlers
@@ -161,7 +159,7 @@ class SwarmWorker:
         try:
             # Use amplifier task tool to spawn the builder agent
             result = self._spawn_agent_session(
-                agent=self.builder_agent,
+                agent=self.builder_agent,  # Pass agent name
                 prompt=prompt,
                 timeout=3600,  # 1 hour
             )
@@ -209,7 +207,7 @@ class SwarmWorker:
 
         try:
             result = self._spawn_agent_session(
-                agent=self.validator_agent,
+                agent=self.validator_agent,  # Pass agent name
                 prompt=prompt,
                 timeout=1800,  # 30 minutes
             )
@@ -248,25 +246,27 @@ class SwarmWorker:
             }
 
     def _spawn_agent_session(self, agent: str, prompt: str, timeout: int) -> dict:
-        """Spawn an Amplifier agent session as a subprocess.
-        
+        """Spawn an Amplifier agent session using the task tool.
+
+        Args:
+            agent: Agent name (e.g., "foundation:modular-builder")
+            prompt: Task instruction for the agent
+            timeout: Timeout in seconds
+
         Returns dict with: output (stdout), stderr, returncode, session_id
         """
-        # Create a temporary file for the prompt
-        prompt_file = self.project_root / f".amplifier/tmp/prompt-{self.worker_id}-{time.time()}.txt"
-        prompt_file.parent.mkdir(parents=True, exist_ok=True)
-        prompt_file.write_text(prompt)
-
         try:
-            # Use amplifier task tool to spawn agent
+            # Use amplifier tool invoke task to spawn agent
             cmd = [
                 "amplifier",
+                "tool",
+                "invoke",
                 "task",
-                agent,
-                f"@{prompt_file}",  # Read prompt from file
+                f"agent={agent}",
+                f"instruction={prompt}",
             ]
 
-            logger.debug(f"Spawning agent: {' '.join(cmd)}")
+            logger.debug(f"Spawning Amplifier task (agent: {agent}, prompt length: {len(prompt)} chars)")
 
             result = subprocess.run(
                 cmd,
@@ -277,35 +277,55 @@ class SwarmWorker:
                 env=os.environ.copy(),
             )
 
+            # Parse session_id from output if available
+            session_id = None
+            try:
+                output_data = json.loads(result.stdout)
+                session_id = output_data.get("session_id")
+            except (json.JSONDecodeError, KeyError):
+                pass
+
             return {
                 "output": result.stdout,
                 "stderr": result.stderr,
                 "returncode": result.returncode,
-                "session_id": None,  # TODO: extract from output if needed
+                "session_id": session_id,
             }
 
-        finally:
-            # Clean up prompt file
-            if prompt_file.exists():
-                prompt_file.unlink()
+        except subprocess.TimeoutExpired:
+            logger.error(f"Amplifier task timed out after {timeout}s")
+            return {
+                "output": "",
+                "stderr": f"Timeout after {timeout}s",
+                "returncode": 124,
+                "session_id": None,
+            }
+        except Exception as e:
+            logger.error(f"Failed to spawn task: {e}")
+            return {
+                "output": "",
+                "stderr": str(e),
+                "returncode": 1,
+                "session_id": None,
+            }
 
     def _build_builder_prompt(self, task: dict) -> str:
         """Build the prompt for the builder agent."""
         files = json.loads(task["files"]) if task["files"] else []
         files_section = "\n".join(f"  - {f}" for f in files) if files else "  (Not specified)"
 
-        return f"""## Task: Implement {task['id']} - {task['name']}
+        return f"""## Task: Implement {task["id"]} - {task["name"]}
 
 **Working Directory:** {self.project_root}
-**Task ID:** {task['id']}
-**Phase:** {task['phase']}
-**Estimated Hours:** {task['estimated_hours']}
+**Task ID:** {task["id"]}
+**Phase:** {task["phase"]}
+**Estimated Hours:** {task["estimated_hours"]}
 
 **Description:**
-{task['description']}
+{task["description"]}
 
 **Acceptance Criteria:**
-{task['acceptance_criteria']}
+{task["acceptance_criteria"]}
 
 **Expected Files:**
 {files_section}
@@ -333,19 +353,19 @@ Return JSON with:
 
     def _build_validator_prompt(self, task: dict, builder_result: dict) -> str:
         """Build the prompt for the validator agent."""
-        return f"""## Task: ANTAGONISTIC Validation of {task['id']}
+        return f"""## Task: ANTAGONISTIC Validation of {task["id"]}
 
 **Your Role:** Senior engineer reviewing code by a junior developer.
 Your job is to find problems, not to approve.
 
 **Working Directory:** {self.project_root}
-**Task ID:** {task['id']}
+**Task ID:** {task["id"]}
 
 **Builder's Implementation:**
-- Files created: {', '.join(builder_result.get('files_created', []))}
-- Files modified: {', '.join(builder_result.get('files_modified', []))}
-- Tests written: {', '.join(builder_result.get('tests_written', []))}
-- Tests passed: {builder_result.get('tests_passed', False)}
+- Files created: {", ".join(builder_result.get("files_created", []))}
+- Files modified: {", ".join(builder_result.get("files_modified", []))}
+- Tests written: {", ".join(builder_result.get("tests_written", []))}
+- Tests passed: {builder_result.get("tests_passed", False)}
 
 **What to Validate:**
 1. **Implementation Quality**: Types, patterns, edge cases
@@ -354,10 +374,10 @@ Your job is to find problems, not to approve.
 4. **Integration**: Does it work with existing code?
 
 **Task Description:**
-{task['description']}
+{task["description"]}
 
 **Acceptance Criteria:**
-{task['acceptance_criteria']}
+{task["acceptance_criteria"]}
 
 **Output Required:**
 Return JSON with:
@@ -413,8 +433,8 @@ def main():
         db_path=args.db,
         worker_id=args.worker_id,
         project_root=args.project_root,
-        builder_agent=args.builder_agent,
-        validator_agent=args.validator_agent,
+        builder_agent=args.builder_agent,  # Pass agent name
+        validator_agent=args.validator_agent,  # Pass agent name
         validation_enabled=not args.no_validation,
     )
 

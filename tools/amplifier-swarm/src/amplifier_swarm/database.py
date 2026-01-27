@@ -1,13 +1,10 @@
 """SQLite database operations for task queue management."""
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +48,9 @@ class TaskDatabase:
                     retry_count INTEGER DEFAULT 0,
                     max_retries INTEGER DEFAULT 2,
                     last_error TEXT,
+                    
+                    -- Dependencies
+                    dependencies TEXT,  -- Comma-separated task IDs that must complete before this task
                     
                     -- Results (JSON)
                     builder_result TEXT,
@@ -118,43 +118,82 @@ class TaskDatabase:
     # Task Operations
     # -------------------------------------------------------------------------
 
-    def claim_task(self, worker_id: str) -> Optional[dict]:
-        """Atomically claim the next available task.
-        
-        Returns task dict if claimed, None if no tasks available.
+    def claim_task(self, worker_id: str) -> dict | None:
+        """Claim next available task with no incomplete dependencies.
+
+        Uses BEGIN IMMEDIATE to prevent race conditions under high load.
+
+        Returns:
+            Task dict if claimed, None if no tasks available
         """
         with self.connection() as conn:
-            # Use UPDATE...RETURNING for atomic claim
-            cursor = conn.execute(
-                """
-                UPDATE tasks 
-                SET status = 'claimed',
-                    worker_id = ?,
-                    claimed_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = (
-                    SELECT id FROM tasks
+            # Start exclusive transaction immediately
+            conn.execute("BEGIN IMMEDIATE")
+
+            try:
+                # Find next available task
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM tasks
                     WHERE status = 'not_started'
+                      AND retry_count < max_retries
+                      AND (
+                          -- No dependencies
+                          dependencies IS NULL OR dependencies = ''
+                          -- OR all dependencies are completed
+                          OR NOT EXISTS (
+                              SELECT 1 FROM tasks t2
+                              WHERE (',' || tasks.dependencies || ',') LIKE ('%,' || t2.id || ',%')
+                                AND t2.status != 'completed'
+                          )
+                      )
                     ORDER BY priority DESC, created_at ASC
                     LIMIT 1
+                    """,
                 )
-                RETURNING *
-                """,
-                (worker_id,),
-            )
-            row = cursor.fetchone()
-            
-            if row:
-                task = dict(row)
-                self.log_event(
-                    conn,
-                    task_id=task["id"],
-                    worker_id=worker_id,
-                    event_type="claimed",
-                    message=f"Task claimed by worker {worker_id}",
+
+                task = cursor.fetchone()
+                if not task:
+                    conn.rollback()
+                    return None
+
+                # Atomically claim it
+                cursor = conn.execute(
+                    """
+                    UPDATE tasks 
+                    SET status = 'claimed', 
+                        worker_id = ?, 
+                        claimed_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND status = 'not_started'
+                    RETURNING *
+                    """,
+                    (worker_id, task["id"]),
                 )
-                return task
-            return None
+
+                claimed_task = cursor.fetchone()
+
+                if claimed_task:
+                    conn.commit()
+                    self.log_event(
+                        conn,
+                        task_id=claimed_task["id"],
+                        worker_id=worker_id,
+                        event_type="claimed",
+                        message=f"Task claimed by worker {worker_id}",
+                    )
+                    logger.info(f"Worker {worker_id} claimed task {claimed_task['id']}")
+                    return dict(claimed_task)
+                else:
+                    # Task was claimed by another worker between SELECT and UPDATE
+                    conn.rollback()
+                    logger.debug(f"Task {task['id']} already claimed by another worker")
+                    return None
+
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"Error claiming task: {e}")
+                raise
 
     def start_task(self, task_id: str, worker_id: str):
         """Mark task as in_progress."""
@@ -182,7 +221,7 @@ class TaskDatabase:
         task_id: str,
         worker_id: str,
         builder_result: dict,
-        validator_result: Optional[dict] = None,
+        validator_result: dict | None = None,
     ):
         """Mark task as completed with results."""
         with self.connection() as conn:
@@ -217,8 +256,8 @@ class TaskDatabase:
         task_id: str,
         worker_id: str,
         error: str,
-        builder_result: Optional[dict] = None,
-        validator_result: Optional[dict] = None,
+        builder_result: dict | None = None,
+        validator_result: dict | None = None,
     ):
         """Mark task as failed."""
         with self.connection() as conn:
@@ -228,7 +267,7 @@ class TaskDatabase:
                 (task_id,),
             )
             row = cursor.fetchone()
-            
+
             if row and row["retry_count"] < row["max_retries"]:
                 # Retry available
                 conn.execute(
@@ -285,21 +324,21 @@ class TaskDatabase:
     def update_task_sessions(
         self,
         task_id: str,
-        builder_session_id: Optional[str] = None,
-        validator_session_id: Optional[str] = None,
+        builder_session_id: str | None = None,
+        validator_session_id: str | None = None,
     ):
         """Update session IDs for task."""
         with self.connection() as conn:
             updates = []
             params = []
-            
+
             if builder_session_id:
                 updates.append("builder_session_id = ?")
                 params.append(builder_session_id)
             if validator_session_id:
                 updates.append("validator_session_id = ?")
                 params.append(validator_session_id)
-            
+
             if updates:
                 params.append(task_id)
                 conn.execute(
@@ -307,7 +346,61 @@ class TaskDatabase:
                     params,
                 )
 
-    def get_task(self, task_id: str) -> Optional[dict]:
+    def add_task_dependency(self, task_id: str, depends_on_task_id: str):
+        """Mark that task_id depends on another task completing first.
+
+        Args:
+            task_id: The task that has a dependency
+            depends_on_task_id: The task that must complete first
+        """
+        with self.connection() as conn:
+            # Get current dependencies
+            cursor = conn.execute("SELECT dependencies FROM tasks WHERE id = ?", (task_id,))
+            row = cursor.fetchone()
+            if not row:
+                logger.warning(f"Task {task_id} not found, cannot add dependency")
+                return
+
+            deps = row["dependencies"] if row["dependencies"] else ""
+            deps_list = [d.strip() for d in deps.split(",") if d.strip()]
+
+            # Add new dependency if not already present
+            if depends_on_task_id not in deps_list:
+                deps_list.append(depends_on_task_id)
+
+            new_deps = ",".join(deps_list)
+
+            conn.execute("UPDATE tasks SET dependencies = ? WHERE id = ?", (new_deps, task_id))
+            conn.commit()
+            logger.info(f"Task {task_id} now depends on {depends_on_task_id}")
+
+    def get_blocked_tasks(self) -> list[dict]:
+        """Get tasks that are blocked by incomplete dependencies.
+
+        Returns:
+            List of tasks with their blocking dependencies
+        """
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT 
+                    t1.id,
+                    t1.name,
+                    t1.dependencies,
+                    t1.status,
+                    GROUP_CONCAT(t2.id || ':' || t2.status) as blocking_tasks
+                FROM tasks t1
+                JOIN tasks t2 ON (',' || t1.dependencies || ',') LIKE ('%,' || t2.id || ',%')
+                WHERE t1.status = 'not_started'
+                  AND t1.dependencies IS NOT NULL
+                  AND t1.dependencies != ''
+                  AND t2.status != 'completed'
+                GROUP BY t1.id
+                """
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_task(self, task_id: str) -> dict | None:
         """Get task by ID."""
         with self.connection() as conn:
             cursor = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
@@ -328,17 +421,15 @@ class TaskDatabase:
                 """
             )
             summary = {row["status"]: {"count": row["count"], "hours": row["total_hours"] or 0} for row in cursor}
-            
+
             # Get total
-            cursor = conn.execute(
-                "SELECT COUNT(*) as total, SUM(estimated_hours) as total_hours FROM tasks"
-            )
+            cursor = conn.execute("SELECT COUNT(*) as total, SUM(estimated_hours) as total_hours FROM tasks")
             row = cursor.fetchone()
             summary["total"] = {"count": row["total"], "hours": row["total_hours"] or 0}
-            
+
             return summary
 
-    def get_all_tasks(self, status: Optional[str] = None) -> list[dict]:
+    def get_all_tasks(self, status: str | None = None) -> list[dict]:
         """Get all tasks, optionally filtered by status."""
         with self.connection() as conn:
             if status:
@@ -347,9 +438,7 @@ class TaskDatabase:
                     (status,),
                 )
             else:
-                cursor = conn.execute(
-                    "SELECT * FROM tasks ORDER BY priority DESC, created_at ASC"
-                )
+                cursor = conn.execute("SELECT * FROM tasks ORDER BY priority DESC, created_at ASC")
             return [dict(row) for row in cursor]
 
     # -------------------------------------------------------------------------
@@ -373,7 +462,7 @@ class TaskDatabase:
                 (worker_id, pid, hostname),
             )
 
-    def heartbeat(self, worker_id: str, current_task_id: Optional[str] = None):
+    def heartbeat(self, worker_id: str, current_task_id: str | None = None):
         """Update worker heartbeat."""
         with self.connection() as conn:
             conn.execute(
@@ -407,7 +496,7 @@ class TaskDatabase:
                 (status, worker_id),
             )
 
-    def get_worker(self, worker_id: str) -> Optional[dict]:
+    def get_worker(self, worker_id: str) -> dict | None:
         """Get worker by ID."""
         with self.connection() as conn:
             cursor = conn.execute("SELECT * FROM workers WHERE worker_id = ?", (worker_id,))
@@ -468,7 +557,7 @@ class TaskDatabase:
                 """,
                 (timeout_minutes,),
             )
-            
+
             # Mark as failed if max retries reached
             conn.execute(
                 """
@@ -492,10 +581,10 @@ class TaskDatabase:
         self,
         conn: sqlite3.Connection,
         task_id: str,
-        worker_id: Optional[str],
+        worker_id: str | None,
         event_type: str,
         message: str,
-        data: Optional[dict] = None,
+        data: dict | None = None,
     ):
         """Log an event (called within existing transaction)."""
         conn.execute(
