@@ -1,0 +1,155 @@
+name: "session-digest"
+description: "Generate a comprehensive digest of an Amplifier session including summary, key decisions, artifacts, and outcomes"
+version: "1.0.0"
+tags: ["session", "analysis", "digest", "summary"]
+
+context:
+  session_id: ""  # Required: Session ID to analyze
+
+steps:
+  - id: "extract-session-info"
+    agent: "foundation:zen-architect"
+    mode: "ANALYZE"
+    prompt: |
+      Analyze the Amplifier session with ID: {{session_id}}
+      
+      Extract and structure the following information:
+      1. Session metadata (start time, duration, user, mode)
+      2. Main objectives and user requests
+      3. Chronological sequence of major activities
+      4. Tools and agents used
+      5. Files created, modified, or analyzed
+      6. Commands executed
+      7. Key decisions made
+      8. Problems encountered and how they were resolved
+      
+      Provide a structured analysis that will be used to generate a comprehensive digest.
+    output: "session_analysis"
+    timeout: 600
+
+  - id: "identify-outcomes"
+    agent: "foundation:zen-architect"
+    mode: "ANALYZE"
+    prompt: |
+      Based on this session analysis:
+      {{session_analysis}}
+      
+      Identify and categorize:
+      1. Concrete outcomes (code written, bugs fixed, features implemented)
+      2. Artifacts produced (files, documentation, configurations)
+      3. Knowledge gained or insights discovered
+      4. Decisions made and rationale
+      5. Action items or follow-ups needed
+      6. Metrics (files changed, lines added/removed, test coverage)
+      
+      Be specific and quantitative where possible.
+    output: "outcomes"
+    timeout: 300
+
+  - id: "assess-quality"
+    agent: "foundation:zen-architect"
+    mode: "REVIEW"
+    prompt: |
+      Based on the session analysis and outcomes:
+      
+      Session Analysis: {{session_analysis}}
+      Outcomes: {{outcomes}}
+      
+      Assess:
+      1. Session effectiveness (did it achieve stated goals?)
+      2. Code quality of any artifacts produced
+      3. Approach quality (were appropriate tools/patterns used?)
+      4. Test coverage and validation performed
+      5. Documentation completeness
+      6. Areas for improvement
+      
+      Provide constructive assessment focused on outcomes and learnings.
+    output: "quality_assessment"
+    timeout: 300
+
+  - id: "generate-digest"
+    agent: "foundation:zen-architect"
+    mode: "ARCHITECT"
+    prompt: |
+      Create a comprehensive session digest document using:
+      
+      Session Analysis: {{session_analysis}}
+      Outcomes: {{outcomes}}
+      Quality Assessment: {{quality_assessment}}
+      
+      Structure the digest as follows:
+      
+      # Session Digest: {{session_id}}
+      
+      ## Executive Summary
+      [2-3 paragraph overview of what was accomplished]
+      
+      ## Session Overview
+      - **Duration**: [time]
+      - **Primary Objective**: [main goal]
+      - **Status**: [completed/partial/blocked]
+      
+      ## Key Activities
+      [Chronological summary of major steps]
+      
+      ## Outcomes & Artifacts
+      ### Code Changes
+      [List of files and changes]
+      
+      ### Artifacts Produced
+      [Documentation, configs, etc.]
+      
+      ### Decisions Made
+      [Key decisions and rationale]
+      
+      ## Quality Assessment
+      [Summary of quality review]
+      
+      ## Metrics
+      - Files modified: [count]
+      - Lines changed: [added/removed]
+      - Tests added: [count]
+      - Commands executed: [count]
+      
+      ## Insights & Learnings
+      [Key takeaways from this session]
+      
+      ## Follow-up Actions
+      [Any next steps or open items]
+      
+      ## References
+      [Links to files, commits, issues mentioned]
+      
+      Make it comprehensive but readable. Use markdown formatting.
+    output: "digest"
+    timeout: 600
+
+  - id: "generate-summary"
+    agent: "foundation:zen-architect"
+    mode: "ANALYZE"
+    prompt: |
+      From this full digest:
+      {{digest}}
+      
+      Create a concise 3-4 sentence summary suitable for:
+      - Commit messages
+      - PR descriptions
+      - Quick reference
+      
+      Focus on: what was done, why, and the outcome.
+    output: "summary"
+    timeout: 120
+
+# Usage:
+#   amplifier run "execute session-digest.yaml with session_id=abc-123-def"
+#
+# Outputs:
+#   - digest: Full markdown digest document
+#   - summary: Concise summary for quick reference
+#
+# This recipe:
+# - Analyzes complete session history
+# - Identifies outcomes and artifacts
+# - Assesses quality and effectiveness
+# - Generates comprehensive documentation
+# - Provides both detailed and summary views

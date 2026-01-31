@@ -38,6 +38,7 @@ Working demonstrations of Amplifier patterns:
 | Recipe | Description |
 |--------|-------------|
 | `feature-workflow.yaml` | Complete feature development lifecycle with design review gate |
+| `session-digest.yaml` | Generate shareable session summaries for collaboration and handoffs |
 
 ### Scripts (`scripts/`)
 
