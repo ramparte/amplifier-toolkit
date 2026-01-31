@@ -1,0 +1,8 @@
+[project]
+name = "amplifier-module-hook-session-indexer"
+version = "0.1.0"
+description = "Hook for auto-indexing Amplifier sessions"
+dependencies = []  # amplifier-core is a PEER dependency, not runtime
+
+[project.entry-points."amplifier.hooks"]
+hook-session-indexer = "amplifier_module_hook_session_indexer"

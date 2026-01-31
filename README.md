@@ -15,6 +15,7 @@ Include these in your own bundle via `#subdirectory=` syntax:
 | `deliberate-development` | Decomposition-first workflow with planning/implementation phases | `git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/deliberate-development` |
 | `looper` | Supervised work loop that keeps working until done | `git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/looper` |
 | `m365-collab` | Agent collaboration via M365 SharePoint | `git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/m365-collab` |
+| `session-discovery` | Automatic session indexing and discovery - "what was I working on last week?" | `git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=bundles/session-discovery` |
 
 **Example usage in your bundle.md:**
 ```yaml
