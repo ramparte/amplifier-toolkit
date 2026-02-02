@@ -4,11 +4,11 @@ bundle:
   version: 1.0.0
 
 includes:
-  - amplifier-toolkit:bundles/deliberate-development
-  - amplifier-toolkit:bundles/looper
-  - amplifier-toolkit:bundles/m365-collab
-  - amplifier-toolkit:bundles/session-discovery
-  - amplifier-toolkit:bundles/task-iteration
+  - bundle: amplifier-toolkit:bundles/deliberate-development
+  - bundle: amplifier-toolkit:bundles/looper
+  - bundle: amplifier-toolkit:bundles/m365-collab
+  - bundle: amplifier-toolkit:bundles/session-discovery
+  - bundle: amplifier-toolkit:bundles/task-iteration
 ---
 
 # Amplifier Toolkit
