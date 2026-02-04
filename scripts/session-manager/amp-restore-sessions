@@ -86,7 +86,7 @@ if [[ "$save_count" -eq 0 ]]; then
     exit 0
 fi
 
-# Function to display a save entry
+# Function to display a save entry with session IDs
 display_save() {
     local save="$1"
     local id=$(echo "$save" | jq -r '.id')
@@ -98,9 +98,18 @@ display_save() {
     
     echo -e "  ${CYAN}#${id}${NC} - ${formatted_date} (${session_count} session(s) in ${dir_count} window(s))"
     
-    # Group by directory for display
+    # Group by directory for display, showing session IDs
     echo "$save" | jq -r '.sessions | group_by(.directory) | .[] | 
-        "      \(.[0].directory): \(length) terminal(s)"'
+        "      \(.[0].directory): \(length) terminal(s)" + 
+        (if length > 1 then " ⚡" else "" end)'
+    
+    # Show individual session IDs for this save
+    echo "$save" | jq -r '.sessions[] | 
+        if .session_id == "UNKNOWN" then
+            "        • \u001b[33munknown\u001b[0m (will use most recent)"
+        else
+            "        • \(.session_id[0:8])..."
+        end'
 }
 
 # List mode: show all saves and let user pick
@@ -157,15 +166,16 @@ fi
 
 # Build trigger file - this time with ARRAY of commands per directory
 # Each terminal that opens will pop the first command from its directory's array
+# FIXED: Include CD command so terminals navigate to the right directory first
 triggers="{}"
 while IFS= read -r session; do
     session_id=$(echo "$session" | jq -r '.session_id')
     directory=$(echo "$session" | jq -r '.directory')
     
     if [[ "$session_id" == "UNKNOWN" ]]; then
-        cmd="amplifier resume"
+        cmd="cd '$directory' && amplifier resume"
     else
-        cmd="amplifier resume '$session_id'"
+        cmd="cd '$directory' && amplifier resume '$session_id'"
     fi
     
     # Add command to array for this directory
@@ -213,4 +223,15 @@ done
 echo ""
 echo -e "${GREEN}VS Code windows opened with terminals!${NC}"
 echo ""
-echo -e "${BLUE}Note:${NC} If terminals didn't auto-run, add the bashrc snippet from README.md"
+echo -e "${BLUE}Note:${NC} If terminals didn't auto-run, add the bashrc snippet:"
+echo ""
+echo -e "${CYAN}# Add to ~/.bashrc:${NC}"
+echo 'if [[ -f /tmp/.amp-restore-triggers.json ]] && [[ -n "$VSCODE_INJECTION" ]]; then'
+echo '    trigger_file="/tmp/.amp-restore-triggers.json"'
+echo '    cwd="$(pwd)"'
+echo '    cmd=$(jq -r --arg dir "$cwd" '\''if .[$dir] and (.[$dir] | length) > 0 then .[$dir][0] else "" end'\'' "$trigger_file" 2>/dev/null)'
+echo '    if [[ -n "$cmd" ]]; then'
+echo '        jq --arg dir "$cwd" '\''if .[$dir] and (.[$dir] | length) > 0 then .[$dir] = .[$dir][1:] else . end'\'' "$trigger_file" > "$trigger_file.tmp" && mv "$trigger_file.tmp" "$trigger_file"'
+echo '        eval "$cmd"'
+echo '    fi'
+echo 'fi'

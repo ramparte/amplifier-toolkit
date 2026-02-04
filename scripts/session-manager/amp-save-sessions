@@ -128,13 +128,21 @@ for amp_pid in $(pgrep -f '/\.local/bin/amplifier' 2>/dev/null); do
         done
     fi
     
+    # Last resort: Use amplifier session list to find most recent session
+    if [[ -z "$session_id" ]]; then
+        # Run amplifier session list in the directory and extract the most recent session ID
+        session_id=$(cd "$amp_cwd" && amplifier session list -n 1 2>/dev/null | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+        # If we got a full UUID, we're good
+        [[ -z "$session_id" ]] && session_id=""
+    fi
+    
     # Report what we found
     if [[ -n "$session_id" ]]; then
         sessions+=("{\"session_id\": \"$session_id\", \"directory\": \"$amp_cwd\", \"amplifier_pid\": $amp_pid}")
         echo -e "  ${GREEN}✓${NC} $amp_cwd"
         echo -e "    Session: ${session_id:0:8}..."
     else
-        # Still save it with a placeholder so we know a session exists here
+        # Still save it with the directory path so we know a session exists here
         sessions+=("{\"session_id\": \"UNKNOWN\", \"directory\": \"$amp_cwd\", \"amplifier_pid\": $amp_pid}")
         echo -e "  ${YELLOW}?${NC} $amp_cwd"
         echo -e "    Session: ${YELLOW}unknown${NC} (will use most recent on restore)"
