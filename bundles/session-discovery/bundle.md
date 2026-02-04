@@ -6,7 +6,7 @@ bundle:
 
 includes:
   - bundle: git+https://github.com/microsoft/amplifier-foundation@main
-  - bundle: session-discovery#subdirectory=behaviors/session-discovery
+  - "session-discovery:behaviors/session-discovery.yaml"
 ---
 
 # Session Discovery
