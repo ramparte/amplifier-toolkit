@@ -2,11 +2,42 @@
 # amp-save-sessions - Save ALL running Amplifier sessions
 # Scans for amplifier processes directly and extracts session IDs
 # Supports multiple sessions per directory (multiple terminals in same VS Code window)
+# Generates a narrative journal (~/.amp-session-journal.md) for "what was I working on"
 
 set -e
 
 # Store outside of ~/.amplifier to survive amplifier reset/cache clearing
 HISTORY_FILE="$HOME/.amp-session-history.json"
+JOURNAL_FILE="$HOME/.amp-session-journal.md"
+
+# Parse arguments
+ANALYZE_MODE=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --analyze|-a)
+            ANALYZE_MODE=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: amp-save-sessions [OPTIONS]"
+            echo ""
+            echo "Save running Amplifier sessions and generate a narrative journal."
+            echo ""
+            echo "Options:"
+            echo "  -a, --analyze    Use session-analyst for richer summaries (slower)"
+            echo "  -h, --help       Show this help message"
+            echo ""
+            echo "Files:"
+            echo "  ~/.amp-session-history.json   Session save history (for restore)"
+            echo "  ~/.amp-session-journal.md     Narrative journal (for 'what was I working on')"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1 (use --help)"
+            exit 1
+            ;;
+    esac
+done
 
 # Migrate from old location if needed
 OLD_HISTORY="$HOME/.amplifier/session-history.json"
@@ -21,6 +52,8 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
+BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
 echo -e "${BLUE}Scanning for running Amplifier sessions...${NC}"
@@ -28,6 +61,7 @@ echo -e "${BLUE}Scanning for running Amplifier sessions...${NC}"
 # Find all running amplifier processes
 sessions=()
 unknown_count=0
+declare -A seen_sessions  # Track session_id+directory combos to deduplicate
 
 for amp_pid in $(pgrep -f '/\.local/bin/amplifier' 2>/dev/null); do
     # Get command line
@@ -36,6 +70,8 @@ for amp_pid in $(pgrep -f '/\.local/bin/amplifier' 2>/dev/null); do
     # Skip diagnostic/grep commands
     [[ "$cmdline" == *"pgrep"* ]] && continue
     [[ "$cmdline" == *"Scanning"* ]] && continue
+    # Skip sub-process python workers (keep only top-level amplifier invocations)
+    [[ "$cmdline" == *"amplifier run -q"* ]] && continue
     
     # Get working directory
     amp_cwd=$(readlink "/proc/$amp_pid/cwd" 2>/dev/null) || continue
@@ -51,14 +87,16 @@ for amp_pid in $(pgrep -f '/\.local/bin/amplifier' 2>/dev/null); do
     
     # Short ID format (8 chars after 'resume')
     if [[ -z "$session_id" ]]; then
-        short_id=$(echo "$cmdline" | grep -oP 'resume\s+\K[0-9a-f]{8}' | head -1)
+        short_id=$(echo "$cmdline" | grep -oP 'resume\s+\K[0-9a-f]{3,8}' | head -1)
         if [[ -n "$short_id" ]]; then
             # Expand short ID to full UUID by finding matching session
             project_path=$(echo "$amp_cwd" | sed 's|^/||; s|/|-|g; s|^|-|')
             project_dir="$HOME/.amplifier/projects/$project_path/sessions"
             for d in "$project_dir"/"$short_id"*/; do
                 if [[ -d "$d" ]]; then
-                    session_id=$(basename "$d")
+                    dir_name=$(basename "$d")
+                    [[ "$dir_name" == *"_"* ]] && continue  # skip sub-sessions
+                    session_id="$dir_name"
                     break
                 fi
             done
@@ -128,13 +166,40 @@ for amp_pid in $(pgrep -f '/\.local/bin/amplifier' 2>/dev/null); do
         done
     fi
     
-    # Last resort: Use amplifier session list to find most recent session
+    # Last resort: Find most recently modified session in this project dir
     if [[ -z "$session_id" ]]; then
-        # Run amplifier session list in the directory and extract the most recent session ID
-        session_id=$(cd "$amp_cwd" && amplifier session list -n 1 2>/dev/null | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
-        # If we got a full UUID, we're good
-        [[ -z "$session_id" ]] && session_id=""
+        project_path=$(echo "$amp_cwd" | sed 's|^/||; s|/|-|g; s|^|-|')
+        project_dir="$HOME/.amplifier/projects/$project_path/sessions"
+        if [[ -d "$project_dir" ]]; then
+            # Find the most recently modified root session (by transcript file)
+            best_session=""
+            best_mtime=0
+            for session_dir in "$project_dir"/*/; do
+                [[ ! -d "$session_dir" ]] && continue
+                dir_name=$(basename "$session_dir")
+                [[ "$dir_name" == *"_"* ]] && continue  # skip sub-sessions
+                t="$session_dir/transcript.jsonl"
+                [[ ! -f "$t" ]] && continue
+                mtime=$(stat -c %Y "$t" 2>/dev/null) || continue
+                if [[ $mtime -gt $best_mtime ]]; then
+                    best_mtime=$mtime
+                    best_session="$dir_name"
+                fi
+            done
+            # Only use if modified in last hour (likely still active)
+            now=$(date +%s)
+            if [[ -n "$best_session" && $((now - best_mtime)) -lt 3600 ]]; then
+                session_id="$best_session"
+            fi
+        fi
     fi
+    
+    # Deduplicate: skip if we already have this session_id+directory combo
+    dedup_key="${session_id:-UNKNOWN}|${amp_cwd}"
+    if [[ -n "${seen_sessions[$dedup_key]+x}" ]]; then
+        continue  # Already recorded this session
+    fi
+    seen_sessions["$dedup_key"]=1
     
     # Report what we found
     if [[ -n "$session_id" ]]; then
@@ -210,3 +275,306 @@ fi
 echo ""
 echo -e "${BLUE}History now contains $(echo "$updated_history" | jq '.saves | length') save(s)${NC}"
 echo -e "To restore: ${GREEN}amp-restore-sessions${NC} or ${GREEN}amp-restore-sessions --list${NC}"
+
+# ============================================================================
+# NARRATIVE JOURNAL GENERATION
+# ============================================================================
+
+echo ""
+echo -e "${BLUE}Generating session journal...${NC}"
+
+# Helper: find session directory from session_id and working directory
+# For UNKNOWN sessions, finds the most recently modified root session
+find_session_dir() {
+    local sid="$1"
+    local wdir="$2"
+    
+    local project_path
+    project_path=$(echo "$wdir" | sed 's|^/||; s|/|-|g; s|^|-|')
+    local sessions_base="$HOME/.amplifier/projects/$project_path/sessions"
+    
+    [[ ! -d "$sessions_base" ]] && return 1
+    
+    # For UNKNOWN sessions, find the most recently modified root session
+    if [[ "$sid" == "UNKNOWN" || -z "$sid" ]]; then
+        local best_dir=""
+        local best_mtime=0
+        for d in "$sessions_base"/*/; do
+            [[ ! -d "$d" ]] && continue
+            local dn
+            dn=$(basename "$d")
+            [[ "$dn" == *"_"* ]] && continue  # skip sub-sessions
+            local t="$d/transcript.jsonl"
+            [[ ! -f "$t" ]] && continue
+            local mt
+            mt=$(stat -c %Y "$t" 2>/dev/null) || continue
+            if [[ $mt -gt $best_mtime ]]; then
+                best_mtime=$mt
+                best_dir="$d"
+            fi
+        done
+        # We know a process is running in this directory, so be generous
+        # Only skip if transcript is older than 7 days (stale/abandoned)
+        local now
+        now=$(date +%s)
+        if [[ -n "$best_dir" && $((now - best_mtime)) -lt 604800 ]]; then
+            echo "$best_dir"
+            return 0
+        fi
+        return 1
+    fi
+    
+    # Exact match
+    local session_dir="$sessions_base/$sid"
+    if [[ -d "$session_dir" ]]; then
+        # Make sure it's not a sub-session
+        [[ "$sid" == *"_"* ]] && return 1
+        echo "$session_dir"
+        return 0
+    fi
+    
+    # Try partial match (short ID)
+    for d in "$sessions_base/${sid:0:8}"*/; do
+        if [[ -d "$d" ]]; then
+            local basename_d
+            basename_d=$(basename "$d")
+            [[ "$basename_d" == *"_"* ]] && continue  # skip sub-sessions
+            echo "$d"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Helper: extract last user message from transcript
+get_last_user_message() {
+    local transcript="$1"
+    [[ ! -f "$transcript" ]] && return
+    tac "$transcript" | while IFS= read -r line; do
+        local role
+        role=$(echo "$line" | jq -r '.role' 2>/dev/null) || continue
+        [[ "$role" != "user" ]] && continue
+        local content
+        content=$(echo "$line" | jq -r '.content // empty' 2>/dev/null)
+        # Skip system-reminder-only messages (just context, not real user input)
+        [[ "$content" == *"<system-reminder"* && ! "$content" == *$'\n'* ]] && continue
+        # Strip system-reminder tags if mixed with real content
+        content=$(echo "$content" | sed '/<system-reminder/,/<\/system-reminder>/d' | head -3)
+        [[ -z "$content" ]] && continue
+        echo "$content" | head -3 | cut -c1-300
+        return
+    done
+}
+
+# Helper: extract last assistant text response from transcript
+get_last_assistant_text() {
+    local transcript="$1"
+    [[ ! -f "$transcript" ]] && return
+    tac "$transcript" | while IFS= read -r line; do
+        local role
+        role=$(echo "$line" | jq -r '.role' 2>/dev/null) || continue
+        [[ "$role" != "assistant" ]] && continue
+        local content
+        content=$(echo "$line" | jq -r '.content // empty' 2>/dev/null)
+        # Content may be a JSON-encoded array of blocks
+        local text
+        text=$(echo "$content" | jq -r '
+            if type == "array" then
+                [.[] | select(.type == "text") | .text] | join("")
+            elif type == "string" then .
+            else empty
+            end
+        ' 2>/dev/null)
+        [[ -z "$text" || ${#text} -lt 5 ]] && continue
+        echo "$text" | head -4 | cut -c1-400
+        return
+    done
+}
+
+# Helper: human-friendly relative time
+relative_time() {
+    local ts="$1"
+    local now
+    now=$(date +%s)
+    local then_s
+    then_s=$(date -d "$ts" +%s 2>/dev/null) || { echo "$ts"; return; }
+    local diff=$((now - then_s))
+    
+    if [[ $diff -lt 60 ]]; then echo "just now"
+    elif [[ $diff -lt 3600 ]]; then echo "$((diff / 60))m ago"
+    elif [[ $diff -lt 86400 ]]; then echo "$((diff / 3600))h ago"
+    elif [[ $diff -lt 172800 ]]; then echo "yesterday"
+    else echo "$((diff / 86400))d ago"
+    fi
+}
+
+# Build the journal
+journal_entries=()
+session_count=0
+
+for session_json in $(echo "$json_sessions" | jq -c '.[]'); do
+    sid=$(echo "$session_json" | jq -r '.session_id')
+    sdir=$(echo "$session_json" | jq -r '.directory')
+    
+    session_dir=$(find_session_dir "$sid" "$sdir" 2>/dev/null) || continue
+    metadata="$session_dir/metadata.json"
+    transcript="$session_dir/transcript.jsonl"
+    
+    [[ ! -f "$metadata" ]] && continue
+    
+    # Read metadata
+    meta_sid=$(jq -r '.session_id // empty' "$metadata" 2>/dev/null)
+    name=$(jq -r '.name // empty' "$metadata" 2>/dev/null)
+    description=$(jq -r '.description // empty' "$metadata" 2>/dev/null)
+    working_dir=$(jq -r '.working_dir // empty' "$metadata" 2>/dev/null)
+    created=$(jq -r '.created // empty' "$metadata" 2>/dev/null)
+    turn_count=$(jq -r '.turn_count // "?" ' "$metadata" 2>/dev/null)
+    model=$(jq -r '.model // "unknown"' "$metadata" 2>/dev/null)
+    
+    # Use metadata session_id if we resolved an UNKNOWN
+    if [[ "$sid" == "UNKNOWN" && -n "$meta_sid" ]]; then
+        sid="$meta_sid"
+    fi
+    
+    # Skip sub-sessions that slipped through
+    [[ "$sid" == *"_"* ]] && continue
+    
+    # Fallback name
+    display_name="${name:-Unnamed session}"
+    
+    # Get recent transcript state
+    last_user=$(get_last_user_message "$transcript")
+    last_assistant=$(get_last_assistant_text "$transcript")
+    
+    # Get last modified time of transcript
+    last_active=""
+    if [[ -f "$transcript" ]]; then
+        last_mod=$(stat -c %Y "$transcript" 2>/dev/null)
+        last_active=$(date -d "@$last_mod" -Iseconds 2>/dev/null)
+    fi
+    
+    # Format relative time
+    rel_time=""
+    if [[ -n "$last_active" ]]; then
+        rel_time=$(relative_time "$last_active")
+    fi
+    
+    # Build entry
+    entry="### ${display_name}"$'\n'
+    entry+="- **Session**: \`${sid:0:8}\` (\`$sid\`)"$'\n'
+    entry+="- **Directory**: \`${working_dir:-$sdir}\`"$'\n'
+    [[ -n "$created" ]] && entry+="- **Started**: $(date -d "$created" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$created")"$'\n'
+    [[ -n "$rel_time" ]] && entry+="- **Last active**: $rel_time"$'\n'
+    entry+="- **Turns**: $turn_count | **Model**: $model"$'\n'
+    
+    if [[ -n "$description" ]]; then
+        entry+=$'\n'"$description"$'\n'
+    fi
+    
+    if [[ -n "$last_user" || -n "$last_assistant" ]]; then
+        entry+=$'\n'"**Recent activity:**"$'\n'
+        if [[ -n "$last_user" ]]; then
+            # Indent and quote the user message
+            entry+=$'\n'"> **User**: ${last_user//$'\n'/ }"$'\n'
+        fi
+        if [[ -n "$last_assistant" ]]; then
+            entry+=$'\n'"> **Assistant**: ${last_assistant//$'\n'/ }"$'\n'
+        fi
+    fi
+    
+    journal_entries+=("$entry")
+    session_count=$((session_count + 1))
+    echo -e "  ${GREEN}✓${NC} Journal: ${display_name} (${sid:0:8})"
+done
+
+# Write the journal file
+{
+    echo "# What I Was Working On"
+    echo ""
+    echo "_Last saved: $(date "+%A, %B %d %Y at %H:%M")_"
+    echo ""
+    echo "**${session_count} active session(s)** across $(echo "$json_sessions" | jq '[.[].directory] | unique | length') project(s)"
+    echo ""
+    echo "---"
+    echo ""
+    
+    for entry in "${journal_entries[@]}"; do
+        echo "$entry"
+        echo ""
+        echo "---"
+        echo ""
+    done
+    
+    # Quick reference section
+    echo "## Quick Resume"
+    echo ""
+    echo "| Session | Directory | Resume Command |"
+    echo "|---------|-----------|----------------|"
+    for session_json in $(echo "$json_sessions" | jq -c '.[]'); do
+        sid=$(echo "$session_json" | jq -r '.session_id')
+        sdir=$(echo "$session_json" | jq -r '.directory')
+        if [[ "$sid" == "UNKNOWN" ]]; then
+            echo "| unknown | \`$sdir\` | \`cd '$sdir' && amplifier resume\` |"
+        else
+            echo "| \`${sid:0:8}\` | \`$sdir\` | \`amplifier resume ${sid:0:8}\` |"
+        fi
+    done
+    echo ""
+    echo "_Run \`amp-working-on\` to view this file anytime._"
+    echo "_Run \`amp-restore-sessions\` to reopen all sessions in VS Code._"
+} > "$JOURNAL_FILE"
+
+echo ""
+echo -e "${GREEN}Journal written to ${JOURNAL_FILE}${NC}"
+echo -e "View with: ${CYAN}amp-working-on${NC} or ${CYAN}cat ~/.amp-session-journal.md${NC}"
+
+# ============================================================================
+# OPTIONAL: SESSION-ANALYST DEEP SUMMARIES
+# ============================================================================
+
+if $ANALYZE_MODE; then
+    echo ""
+    echo -e "${BLUE}${BOLD}Running session-analyst for deeper summaries...${NC}"
+    echo -e "${DIM}(This may take a minute per session)${NC}"
+    
+    analyst_results=""
+    
+    for session_json in $(echo "$json_sessions" | jq -c '.[]'); do
+        sid=$(echo "$session_json" | jq -r '.session_id')
+        sdir=$(echo "$session_json" | jq -r '.directory')
+        
+        [[ "$sid" == "UNKNOWN" ]] && continue
+        
+        session_dir=$(find_session_dir "$sid" "$sdir" 2>/dev/null) || continue
+        
+        echo -e "  ${CYAN}→${NC} Analyzing ${sid:0:8}..."
+        
+        # Invoke amplifier with session-analyst to get a brief summary
+        summary=$(cd "$sdir" && amplifier run -q \
+            "Use session-analyst to analyze session $sid. Give me a 2-3 sentence summary of: what the user is working on, what state they left it in, and any next steps mentioned. Session directory: $session_dir. Be brief and factual." \
+            2>/dev/null | tail -20) || {
+            echo -e "  ${YELLOW}⚠${NC} Analysis failed for ${sid:0:8}"
+            continue
+        }
+        
+        if [[ -n "$summary" ]]; then
+            analyst_results+=$'\n'"#### Session-analyst summary for \`${sid:0:8}\`"$'\n'
+            analyst_results+="$summary"$'\n'
+            echo -e "  ${GREEN}✓${NC} Got summary for ${sid:0:8}"
+        fi
+    done
+    
+    if [[ -n "$analyst_results" ]]; then
+        # Append analyst summaries to journal
+        {
+            echo ""
+            echo "## Deep Analysis (session-analyst)"
+            echo ""
+            echo "_Generated $(date "+%H:%M") via \`--analyze\` flag_"
+            echo "$analyst_results"
+        } >> "$JOURNAL_FILE"
+        
+        echo ""
+        echo -e "${GREEN}Session-analyst summaries appended to journal.${NC}"
+    fi
+fi
