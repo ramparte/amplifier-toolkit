@@ -51,6 +51,7 @@ Working demonstrations of Amplifier patterns:
 | Skill | Description |
 |-------|-------------|
 | `code-field` | Environmental prompting for rigorous code generation |
+| `project-mgmt` | AI-native project management with task tracking and team-aware assignment |
 
 ### Tools (`tools/`)
 
