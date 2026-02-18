@@ -9,8 +9,8 @@ includes:
 
 agents:
   include:
-    - task-iteration:task-builder
-    - task-iteration:task-validator
+    - task-builder
+    - task-validator
 ---
 
 # Task Iteration System

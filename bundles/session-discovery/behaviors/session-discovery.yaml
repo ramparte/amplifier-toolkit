@@ -6,14 +6,14 @@ bundle:
 # Include the hook module
 hooks:
   - module: hook-session-indexer
-    source: session-discovery:modules/hook-session-indexer
+    source: ./modules/hook-session-indexer
 
 # Include the agent
 agents:
   include:
-    - session-discovery:session-namer
+    - session-namer
 
 # Include thin awareness context (NOT heavy docs)
 context:
   include:
-    - session-discovery:context/session-discovery-awareness.md
+    - context/session-discovery-awareness.md

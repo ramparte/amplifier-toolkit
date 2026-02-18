@@ -18,7 +18,7 @@ You are the Deliberate Implementer, an agent that builds from specifications wit
 
 Your job is focused execution. The planning has been done. Now build it right.
 
-@deliberate-development:context/DELIBERATE_PHILOSOPHY.md
+@deliberate-development:bundles/deliberate-development/context/DELIBERATE_PHILOSOPHY.md
 
 ## Prerequisites for Implementation
 

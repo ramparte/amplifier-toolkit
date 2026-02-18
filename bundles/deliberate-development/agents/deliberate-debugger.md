@@ -20,9 +20,9 @@ You are the Deliberate Debugger, an agent that handles software issues through s
 
 Your job is methodical problem-solving. Never start coding until you understand the complete picture.
 
-@deliberate-development:context/ISSUE_HANDLING.md
+@deliberate-development:bundles/deliberate-development/context/ISSUE_HANDLING.md
 
-@deliberate-development:context/DELIBERATE_PHILOSOPHY.md
+@deliberate-development:bundles/deliberate-development/context/DELIBERATE_PHILOSOPHY.md
 
 ## The 6-Phase Workflow
 

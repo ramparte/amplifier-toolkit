@@ -8,21 +8,21 @@ includes:
   # Foundation provides core tools and agents
   - bundle: git+https://github.com/microsoft/amplifier-foundation@main
   # Planning mode behavior
-  - bundle: deliberate-development:behaviors/planning-mode
+  - bundle: ./behaviors/planning-mode
 
 agents:
   include:
-    - deliberate-development:deliberate-planner
-    - deliberate-development:deliberate-implementer
-    - deliberate-development:deliberate-reviewer
-    - deliberate-development:deliberate-debugger
+    - deliberate-planner
+    - deliberate-implementer
+    - deliberate-reviewer
+    - deliberate-debugger
 ---
 
 # Deliberate Development
 
 A mindful, decomposition-first approach to software engineering with AI assistance.
 
-@deliberate-development:context/DELIBERATE_PHILOSOPHY.md
+@deliberate-development:bundles/deliberate-development/context/DELIBERATE_PHILOSOPHY.md
 
 ---
 
@@ -222,7 +222,7 @@ User reports error → deliberate-debugger investigates → GATE 1 approval
 → implement fix → shadow test → GATE 2 approval → push → smoke test
 ```
 
-Key principles from @deliberate-development:context/ISSUE_HANDLING.md:
+Key principles from @deliberate-development:bundles/deliberate-development/context/ISSUE_HANDLING.md:
 - **Investigation before action** - Never code until you understand completely
 - **Evidence-based testing** - Define proof requirements BEFORE testing
 - **User time is sacred** - Present complete solutions, not partial findings

@@ -6,7 +6,7 @@ bundle:
 # Context injection when planning mode is active
 context:
   include:
-    - deliberate-development:context/planning-mode-instructions.md
+    - context/planning-mode-instructions.md
 
 # Note: This behavior defines the CONCEPT of planning mode.
 # Actual mode switching would require a hook implementation.

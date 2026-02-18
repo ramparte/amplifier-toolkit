@@ -13,4 +13,4 @@ bundle:
 
 includes:
   # The behavior that provides the tool
-  - bundle: m365-collab:behaviors/m365-collab
+  - bundle: ./behaviors/m365-collab

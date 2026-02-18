@@ -16,4 +16,4 @@ tools:
 # Context documentation
 context:
   include:
-    - m365-collab:context/m365-collaboration.md
+    - context/m365-collaboration.md

@@ -5,12 +5,12 @@ bundle:
   description: Supervised work loop - keeps working until a task is truly done
 
 tools:
-  - module: looper:looper.tool
+  - module: ./looper.tool
     config: {}
 
 agents:
   task-supervisor:
-    bundle: looper:agents/supervisor.md
+    bundle: ./agents/supervisor.md
 ---
 
 # Looper Bundle
