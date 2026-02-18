@@ -11,6 +11,11 @@ bundle:
   version: 0.1.0
   description: Agent collaboration via M365 SharePoint
 
-includes:
-  # The behavior that provides the tool
-  - bundle: ./behaviors/m365-collab
+tools:
+  - module: tool-m365-collab
+    source: git+https://github.com/ramparte/amplifier-toolkit@main#subdirectory=tools/m365-collab
+    config: {}
+
+context:
+  include:
+    - context/m365-collaboration.md

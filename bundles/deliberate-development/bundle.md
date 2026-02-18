@@ -5,10 +5,7 @@ bundle:
   description: Deliberate development workflow - decomposition-first thinking, ephemeral workspaces, and validation-implicit implementation
 
 includes:
-  # Foundation provides core tools and agents
   - bundle: git+https://github.com/microsoft/amplifier-foundation@main
-  # Planning mode behavior
-  - bundle: ./behaviors/planning-mode
 
 agents:
   include:
@@ -16,6 +13,10 @@ agents:
     - deliberate-implementer
     - deliberate-reviewer
     - deliberate-debugger
+
+context:
+  include:
+    - context/planning-mode-instructions.md
 ---
 
 # Deliberate Development

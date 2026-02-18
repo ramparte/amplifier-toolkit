@@ -6,7 +6,18 @@ bundle:
 
 includes:
   - bundle: git+https://github.com/microsoft/amplifier-foundation@main
-  - bundle: ./behaviors/session-discovery
+
+hooks:
+  - module: hook-session-indexer
+    source: ./modules/hook-session-indexer
+
+agents:
+  include:
+    - session-namer
+
+context:
+  include:
+    - context/session-discovery-awareness.md
 ---
 
 # Session Discovery
