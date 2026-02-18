@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from amplifier_core import HookResult  # type: ignore[import-not-found]
+from amplifier_core import HookResult, ModuleCoordinator  # type: ignore[import-not-found]
 
 
 class SessionIndexer:
@@ -127,15 +127,12 @@ class SessionIndexer:
             json.dump(index, f, indent=2)
 
 
-def mount():
-    """Entry point - returns hook instances for coordinator to register."""
+async def mount(coordinator: ModuleCoordinator, config: dict[str, Any] | None = None):
+    """Mount the session indexer hook."""
     indexer = SessionIndexer()
 
-    return {
-        "hooks": [
-            {
-                "event": "session:end",
-                "handler": indexer.on_session_end,
-            }
-        ]
-    }
+    coordinator.hooks.register(
+        "session:end",
+        indexer.on_session_end,
+        name="hook-session-indexer",
+    )
