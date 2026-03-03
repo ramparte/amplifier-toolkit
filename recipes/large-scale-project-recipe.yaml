@@ -338,7 +338,7 @@ stages:
           Output as Markdown formatted for a design document.
         foreach: "{{design_domains_list.critical_domains}}"
         as: "domain"
-        parallel: true  # Run 4-6 domains simultaneously
+        parallel: 3  # Run up to 3 domains simultaneously
         collect: "domain_designs"
         timeout: 1800  # 30 minutes per domain
       
