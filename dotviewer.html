@@ -17,22 +17,50 @@
   #toolbar {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 16px;
+    gap: 8px;
+    padding: 6px 12px;
     flex-shrink: 0;
+    flex-wrap: nowrap;
     transition: background 0.2s, border-color 0.2s;
   }
   #toolbar button, #toolbar label, #toolbar select {
-    padding: 6px 14px;
+    padding: 5px 11px;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12px;
     border: 1px solid;
     transition: background 0.2s, color 0.2s, border-color 0.2s;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
-  #toolbar select { padding: 5px 10px; }
-  #toolbar .filename { font-size: 13px; margin-left: auto; }
-  #toolbar .help { font-size: 12px; }
+  #toolbar select { padding: 4px 8px; }
+  #search-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 1;
+    min-width: 120px;
+  }
+  #search-input {
+    padding: 4px 8px 4px 24px;
+    border-radius: 4px;
+    font-size: 12px;
+    border: 1px solid;
+    width: 140px;
+    transition: background 0.2s, color 0.2s, border-color 0.2s, width 0.2s;
+  }
+  #search-input:focus { outline: none; width: 180px; }
+  #search-icon {
+    position: absolute; left: 7px; top: 50%; transform: translateY(-50%);
+    font-size: 11px; pointer-events: none; opacity: 0.5;
+  }
+  #search-count {
+    position: absolute; right: -28px;
+    font-size: 11px; white-space: nowrap; opacity: 0.7;
+    pointer-events: none;
+  }
+  #toolbar .filename { font-size: 12px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+  #toolbar .help { font-size: 11px; white-space: nowrap; flex-shrink: 0; }
   #file-input { display: none; }
   #canvas { flex: 1; position: relative; overflow: hidden; }
   #svg-container { width: 100%; height: 100%; }
@@ -51,20 +79,74 @@
     position: absolute; bottom: 16px; left: 16px; right: 16px;
     background: #4a0000; color: #ff6b6b;
     padding: 10px 14px; border-radius: 4px; font-size: 13px;
-    display: none; white-space: pre-wrap;
+    display: none; white-space: pre-wrap; z-index: 20;
   }
+  /* ── Info Panel ── */
+  #info-panel {
+    position: absolute; top: 0; right: 0;
+    width: 270px; max-height: 100%;
+    overflow-y: auto;
+    padding: 14px 16px;
+    display: none; z-index: 10;
+    border-left: 1px solid transparent;
+    transition: background 0.2s, border-color 0.2s;
+  }
+  #info-panel.visible { display: block; }
+  #info-panel .ip-header { display: flex; align-items: center; margin-bottom: 10px; gap: 8px; }
+  #info-panel .ip-label { font-size: 13px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #info-panel .ip-id { font-size: 10px; opacity: 0.55; margin-bottom: 10px; word-break: break-all; }
+  #info-panel .ip-close { cursor: pointer; font-size: 16px; flex-shrink: 0; opacity: 0.6; line-height: 1; }
+  #info-panel .ip-close:hover { opacity: 1; }
+  #info-panel .ip-section { margin-bottom: 12px; }
+  #info-panel .ip-section-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.5; margin-bottom: 5px; }
+  #info-panel .ip-cluster { font-size: 12px; padding: 3px 7px; border-radius: 3px; display: inline-block; }
+  #info-panel .ip-list { list-style: none; }
+  #info-panel .ip-list li { font-size: 12px; padding: 1px 0; opacity: 0.85; }
+  #info-panel .ip-list li::before { content: "→ "; opacity: 0.5; }
+  #info-panel .ip-empty { font-size: 12px; opacity: 0.4; font-style: italic; }
+  /* ── SVG interaction classes ── */
+  .node, .edge, .cluster { transition: opacity 0.1s; }
+  .node { cursor: pointer; }
+  /* Dimming */
+  .node.dimmed, .edge.dimmed { opacity: 0.13 !important; }
+  /* Hover */
+  .node.hover-hl > ellipse, .node.hover-hl > polygon, .node.hover-hl > rect,
+  .node.hover-hl > path { filter: brightness(1.4) drop-shadow(0 0 4px currentColor); }
+  .edge.hover-hl path { stroke-width: 2.2px !important; }
+  /* Selected */
+  .node.selected > ellipse, .node.selected > polygon, .node.selected > rect,
+  .node.selected > path { stroke-width: 2.5px !important; filter: drop-shadow(0 0 7px var(--sel-glow, #58a6ff)); }
+  /* Search */
+  .node.search-match > ellipse, .node.search-match > polygon, .node.search-match > rect,
+  .node.search-match > path { filter: brightness(1.5) drop-shadow(0 0 5px var(--sel-glow, #58a6ff)); stroke-width: 2px !important; }
+  .node.search-dim, .edge.search-dim { opacity: 0.1 !important; }
+  /* Cluster hint */
+  .cluster { cursor: default; }
+  g[data-proxy-line] { pointer-events: none; }
 </style>
 </head>
 <body>
 
 <div id="toolbar">
-  <label for="file-input">Open .dot file</label>
+  <label for="file-input">Open .dot</label>
   <input type="file" id="file-input" accept=".dot,.gv,.graphviz,text/plain">
-  <button id="btn-fit">Fit (Home)</button>
+  <button id="btn-fit">Fit</button>
   <button id="btn-zoom-in">+</button>
-  <button id="btn-zoom-out">-</button>
+  <button id="btn-zoom-out">−</button>
+  <button id="btn-reset">Reset Layout</button>
+  <select id="rankdir-select">
+    <option value="TB">Layout: TB ↓</option>
+    <option value="LR">Layout: LR →</option>
+    <option value="BT">Layout: BT ↑</option>
+    <option value="RL">Layout: RL ←</option>
+  </select>
   <select id="scheme-select"></select>
-  <span class="help">scroll=zoom, drag=pan</span>
+  <div id="search-wrap">
+    <span id="search-icon">🔍</span>
+    <input type="text" id="search-input" placeholder="Search nodes…">
+    <span id="search-count"></span>
+  </div>
+  <span class="help" id="help-text">scroll=zoom · drag=pan · dblclick cluster=collapse</span>
   <span class="filename" id="filename"></span>
 </div>
 
@@ -72,7 +154,26 @@
   <div id="svg-container"></div>
   <div id="drop-overlay" class="empty">
     <div class="msg">Drop a .dot file here</div>
-    <div class="sub">or click "Open .dot file" above</div>
+    <div class="sub">or click "Open .dot" above</div>
+  </div>
+  <div id="info-panel">
+    <div class="ip-header">
+      <span class="ip-label" id="ip-label"></span>
+      <span class="ip-close" id="ip-close">✕</span>
+    </div>
+    <div class="ip-id" id="ip-id"></div>
+    <div class="ip-section" id="ip-cluster-wrap">
+      <div class="ip-section-title">Cluster</div>
+      <span class="ip-cluster" id="ip-cluster"></span>
+    </div>
+    <div class="ip-section">
+      <div class="ip-section-title">Incoming (<span id="ip-in-count">0</span>)</div>
+      <ul class="ip-list" id="ip-in-list"></ul>
+    </div>
+    <div class="ip-section">
+      <div class="ip-section-title">Outgoing (<span id="ip-out-count">0</span>)</div>
+      <ul class="ip-list" id="ip-out-list"></ul>
+    </div>
   </div>
   <div id="error"></div>
 </div>
@@ -81,89 +182,109 @@
 <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
 <script>
 (function() {
-  // ── Color schemes ──────────────────────────────────────────────
+  // ── Color schemes ──────────────────────────────────────────────────────
   const SCHEMES = {
     dark: {
       label: 'Dark',
       bg: '#1a1a2e', toolbar: '#16213e', toolbarBorder: '#0f3460',
       btn: '#0f3460', btnBorder: '#533483', btnHover: '#533483',
       uiText: '#e0e0e0', dimText: '#7f8c8d', hintText: '#555',
-      overlayAccent: '#533483',
+      overlayAccent: '#533483', selGlow: '#a88beb',
       nodeFill: '#2a2a4a', nodeStroke: '#8899bb',
       edgeStroke: '#8899bb', edgeArrow: '#8899bb',
       text: '#e0e0e0', darkText: '#1a1a2e',
       clusterFill: '#222244', clusterStroke: '#667799',
+      infoBg: 'rgba(22,33,62,0.92)', infoBorder: '#0f3460',
     },
     light: {
       label: 'Light',
       bg: '#f5f5f5', toolbar: '#ffffff', toolbarBorder: '#ddd',
       btn: '#e8e8e8', btnBorder: '#ccc', btnHover: '#d0d0d0',
       uiText: '#333', dimText: '#888', hintText: '#aaa',
-      overlayAccent: '#888',
+      overlayAccent: '#888', selGlow: '#555',
       nodeFill: '#ffffff', nodeStroke: '#333333',
       edgeStroke: '#555555', edgeArrow: '#555555',
       text: '#222222', darkText: '#222222',
       clusterFill: '#f0f0f0', clusterStroke: '#999999',
+      infoBg: 'rgba(255,255,255,0.93)', infoBorder: '#ddd',
     },
     midnight: {
       label: 'Midnight',
       bg: '#0d1117', toolbar: '#161b22', toolbarBorder: '#30363d',
       btn: '#21262d', btnBorder: '#30363d', btnHover: '#30363d',
       uiText: '#c9d1d9', dimText: '#6e7681', hintText: '#484f58',
-      overlayAccent: '#58a6ff',
+      overlayAccent: '#58a6ff', selGlow: '#58a6ff',
       nodeFill: '#161b22', nodeStroke: '#58a6ff',
       edgeStroke: '#58a6ff', edgeArrow: '#58a6ff',
       text: '#c9d1d9', darkText: '#0d1117',
       clusterFill: '#0d1117', clusterStroke: '#30363d',
+      infoBg: 'rgba(22,27,34,0.93)', infoBorder: '#30363d',
     },
     solarized: {
       label: 'Solarized Dark',
       bg: '#002b36', toolbar: '#073642', toolbarBorder: '#586e75',
       btn: '#073642', btnBorder: '#586e75', btnHover: '#586e75',
       uiText: '#93a1a1', dimText: '#657b83', hintText: '#586e75',
-      overlayAccent: '#268bd2',
+      overlayAccent: '#268bd2', selGlow: '#268bd2',
       nodeFill: '#073642', nodeStroke: '#93a1a1',
       edgeStroke: '#839496', edgeArrow: '#839496',
       text: '#eee8d5', darkText: '#002b36',
       clusterFill: '#002b36', clusterStroke: '#586e75',
+      infoBg: 'rgba(7,54,66,0.93)', infoBorder: '#586e75',
     },
     blueprint: {
       label: 'Blueprint',
       bg: '#0a1929', toolbar: '#0d2137', toolbarBorder: '#1a3a5c',
       btn: '#122d4d', btnBorder: '#1a3a5c', btnHover: '#1a3a5c',
       uiText: '#b0d4f1', dimText: '#4a7aa8', hintText: '#2d5a85',
-      overlayAccent: '#4fc3f7',
+      overlayAccent: '#4fc3f7', selGlow: '#4fc3f7',
       nodeFill: '#0d2137', nodeStroke: '#4fc3f7',
       edgeStroke: '#4fc3f7', edgeArrow: '#4fc3f7',
       text: '#e1f5fe', darkText: '#0a1929',
       clusterFill: '#0a1929', clusterStroke: '#1a3a5c',
+      infoBg: 'rgba(13,33,55,0.93)', infoBorder: '#1a3a5c',
     },
     highContrast: {
       label: 'High Contrast',
       bg: '#000000', toolbar: '#1a1a1a', toolbarBorder: '#444',
       btn: '#2a2a2a', btnBorder: '#555', btnHover: '#444',
       uiText: '#ffffff', dimText: '#aaa', hintText: '#666',
-      overlayAccent: '#ffff00',
+      overlayAccent: '#ffff00', selGlow: '#ffff00',
       nodeFill: '#1a1a1a', nodeStroke: '#ffffff',
       edgeStroke: '#ffff00', edgeArrow: '#ffff00',
       text: '#ffffff', darkText: '#000000',
       clusterFill: '#0a0a0a', clusterStroke: '#666666',
+      infoBg: 'rgba(26,26,26,0.95)', infoBorder: '#444',
     },
   };
 
-  const container = document.getElementById('svg-container');
-  const overlay = document.getElementById('drop-overlay');
-  const errorEl = document.getElementById('error');
-  const filenameEl = document.getElementById('filename');
-  const fileInput = document.getElementById('file-input');
-  const toolbar = document.getElementById('toolbar');
+  // ── DOM refs ───────────────────────────────────────────────────────────
+  const container    = document.getElementById('svg-container');
+  const overlay      = document.getElementById('drop-overlay');
+  const errorEl      = document.getElementById('error');
+  const filenameEl   = document.getElementById('filename');
+  const fileInput    = document.getElementById('file-input');
+  const toolbar      = document.getElementById('toolbar');
   const schemeSelect = document.getElementById('scheme-select');
-  let panZoomInstance = null;
-  let currentScheme = 'dark';
-  let lastDotSource = null;
-  let lastDotName = null;
+  const rankdirSel   = document.getElementById('rankdir-select');
+  const searchInput  = document.getElementById('search-input');
+  const searchCount  = document.getElementById('search-count');
+  const infoPanel    = document.getElementById('info-panel');
+  const canvasEl     = document.getElementById('canvas');
 
-  // ── Color utilities ────────────────────────────────────────────
+  // ── State ──────────────────────────────────────────────────────────────
+  let panZoomInstance = null;
+  let currentScheme  = 'dark';
+  let lastDotSource  = null;   // original untouched source
+  let lastDotName    = null;
+  let graphData      = null;   // { nodes, edges, clusters }
+  let selectedNodeId = null;
+  let searchQuery    = '';
+  let currentRankdir = 'TB';
+  let isDragging     = false;
+  let vizPromise     = null;
+
+  // ── Color utilities ────────────────────────────────────────────────────
   function parseHexColor(str) {
     if (!str || typeof str !== 'string') return null;
     str = str.trim();
@@ -172,53 +293,39 @@
     let hex = m[1];
     if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
     if (hex.length < 6) return null;
-    return {
-      r: parseInt(hex.substr(0,2), 16),
-      g: parseInt(hex.substr(2,2), 16),
-      b: parseInt(hex.substr(4,2), 16),
-    };
+    return { r: parseInt(hex.substr(0,2),16), g: parseInt(hex.substr(2,2),16), b: parseInt(hex.substr(4,2),16) };
   }
-
   function relativeLuminance(rgb) {
-    let r = rgb.r / 255, g = rgb.g / 255, b = rgb.b / 255;
-    r = r <= 0.03928 ? r/12.92 : Math.pow((r+0.055)/1.055, 2.4);
-    g = g <= 0.03928 ? g/12.92 : Math.pow((g+0.055)/1.055, 2.4);
-    b = b <= 0.03928 ? b/12.92 : Math.pow((b+0.055)/1.055, 2.4);
+    let r=rgb.r/255, g=rgb.g/255, b=rgb.b/255;
+    r = r<=0.03928 ? r/12.92 : Math.pow((r+0.055)/1.055,2.4);
+    g = g<=0.03928 ? g/12.92 : Math.pow((g+0.055)/1.055,2.4);
+    b = b<=0.03928 ? b/12.92 : Math.pow((b+0.055)/1.055,2.4);
     return 0.2126*r + 0.7152*g + 0.0722*b;
   }
-
   function isLightColor(hex) {
     const rgb = parseHexColor(hex);
-    if (!rgb) return false;
-    return relativeLuminance(rgb) > 0.35;
+    return rgb ? relativeLuminance(rgb) > 0.35 : false;
+  }
+  function isDefaultBlack(v) {
+    if (!v) return true;
+    v = v.toLowerCase().trim();
+    return v==='#000000'||v==='#000'||v==='black';
+  }
+  function isDefaultWhite(v) {
+    if (!v) return false;
+    v = v.toLowerCase().trim();
+    return v==='#ffffff'||v==='#fff'||v==='white';
+  }
+  function textColorFor(bgHex, s) {
+    return isLightColor(bgHex) ? s.darkText : s.text;
   }
 
-  function isDefaultBlack(val) {
-    if (!val) return true;
-    const v = val.toLowerCase().trim();
-    return v === '#000000' || v === '#000' || v === 'black';
-  }
-
-  function isDefaultWhite(val) {
-    if (!val) return false;
-    const v = val.toLowerCase().trim();
-    return v === '#ffffff' || v === '#fff' || v === 'white';
-  }
-
-  // Pick readable text color based on actual background fill
-  function textColorFor(bgHex, scheme) {
-    if (isLightColor(bgHex)) return scheme.darkText;
-    return scheme.text;
-  }
-
-  // ── Scheme selector setup ──────────────────────────────────────
+  // ── Scheme selector setup ──────────────────────────────────────────────
   for (const [key, s] of Object.entries(SCHEMES)) {
     const opt = document.createElement('option');
-    opt.value = key;
-    opt.textContent = s.label;
+    opt.value = key; opt.textContent = 'Scheme: ' + s.label;
     schemeSelect.appendChild(opt);
   }
-
   const saved = localStorage.getItem('dotviewer-scheme');
   if (saved && SCHEMES[saved]) currentScheme = saved;
   schemeSelect.value = currentScheme;
@@ -233,125 +340,675 @@
       el.style.color = s.uiText;
       el.style.borderColor = s.btnBorder;
     });
+    searchInput.style.background = s.btn;
+    searchInput.style.color = s.uiText;
+    searchInput.style.borderColor = s.btnBorder;
     filenameEl.style.color = s.dimText;
-    toolbar.querySelector('.help').style.color = s.hintText;
+    document.getElementById('help-text').style.color = s.hintText;
     overlay.querySelector('.msg').style.color = s.overlayAccent;
     overlay.querySelector('.sub').style.color = s.hintText;
+    searchCount.style.color = s.dimText;
+    // Info panel
+    infoPanel.style.background = s.infoBg;
+    infoPanel.style.borderColor = s.infoBorder;
+    infoPanel.style.color = s.uiText;
+    document.querySelector('#ip-cluster').style.background = s.btn;
+    document.querySelector('#ip-cluster').style.borderColor = s.btnBorder;
+    // CSS var for glow
+    document.documentElement.style.setProperty('--sel-glow', s.selGlow);
   }
 
-  // ── SVG recoloring (luminance-aware) ───────────────────────────
+  // ── SVG recoloring (luminance-aware, preserved) ────────────────────────
   function applySchemeToSVG(svg, s) {
-    // Graph background → transparent
     svg.querySelectorAll('.graph > polygon').forEach(p => {
-      p.setAttribute('fill', 'none');
-      p.setAttribute('stroke', 'none');
+      p.setAttribute('fill','none'); p.setAttribute('stroke','none');
     });
+    svg.querySelectorAll('.graph > text').forEach(t => t.setAttribute('fill',s.text));
 
-    // Graph title text
-    svg.querySelectorAll('.graph > text').forEach(t => {
-      t.setAttribute('fill', s.text);
-    });
-
-    // ── Nodes: smart text color based on fill luminance ──
     svg.querySelectorAll('.node').forEach(group => {
-      const shape = group.querySelector('polygon, ellipse, path, rect');
+      const shape = group.querySelector('polygon,ellipse,path,rect');
       if (!shape) return;
-
       let fill = shape.getAttribute('fill');
-
-      // Replace default white fills with scheme fill
-      if (isDefaultWhite(fill)) {
-        shape.setAttribute('fill', s.nodeFill);
-        fill = s.nodeFill;
-      }
-
-      // Replace default black strokes
-      if (isDefaultBlack(shape.getAttribute('stroke'))) {
-        shape.setAttribute('stroke', s.nodeStroke);
-      }
-
-      // Pick text color based on actual fill luminance
-      const actualFill = shape.getAttribute('fill') || s.nodeFill;
-      const tc = textColorFor(actualFill, s);
-      group.querySelectorAll('text').forEach(t => t.setAttribute('fill', tc));
+      if (isDefaultWhite(fill)) { shape.setAttribute('fill',s.nodeFill); fill=s.nodeFill; }
+      if (isDefaultBlack(shape.getAttribute('stroke'))) shape.setAttribute('stroke',s.nodeStroke);
+      const tc = textColorFor(shape.getAttribute('fill')||s.nodeFill, s);
+      group.querySelectorAll('text').forEach(t => t.setAttribute('fill',tc));
     });
 
-    // ── Clusters (subgraphs): same luminance logic ──
     svg.querySelectorAll('.cluster').forEach(group => {
-      const shape = group.querySelector('polygon, path, rect');
+      const shape = group.querySelector('polygon,path,rect');
       if (!shape) return;
-
       let fill = shape.getAttribute('fill');
-      if (isDefaultWhite(fill)) {
-        shape.setAttribute('fill', s.clusterFill);
-        fill = s.clusterFill;
-      }
-      if (isDefaultBlack(shape.getAttribute('stroke'))) {
-        shape.setAttribute('stroke', s.clusterStroke);
-      }
-
-      // Cluster title text
-      const actualFill = shape.getAttribute('fill') || s.bg;
-      // Cluster labels sit on the cluster bg, but also on the page bg
-      // Use scheme text for cluster labels (they're at the top edge)
+      if (isDefaultWhite(fill)) { shape.setAttribute('fill',s.clusterFill); fill=s.clusterFill; }
+      if (isDefaultBlack(shape.getAttribute('stroke'))) shape.setAttribute('stroke',s.clusterStroke);
       group.querySelectorAll(':scope > text').forEach(t => {
-        // If the cluster has a custom fontcolor, leave it; otherwise adapt
         if (isDefaultBlack(t.getAttribute('fill'))) {
-          t.setAttribute('fill', s.text);
+          t.setAttribute('fill',s.text);
         } else {
-          // Custom fontcolor: check if it's readable against page bg
-          const customColor = t.getAttribute('fill');
-          if (isLightColor(s.bg) === isLightColor(customColor)) {
-            // Same lightness = poor contrast, override
-            t.setAttribute('fill', s.text);
-          }
+          const cc = t.getAttribute('fill');
+          if (isLightColor(s.bg)===isLightColor(cc)) t.setAttribute('fill',s.text);
         }
       });
     });
 
-    // ── Edges ──
     svg.querySelectorAll('.edge path').forEach(el => {
-      if (isDefaultBlack(el.getAttribute('stroke'))) {
-        el.setAttribute('stroke', s.edgeStroke);
-      }
+      if (isDefaultBlack(el.getAttribute('stroke'))) el.setAttribute('stroke',s.edgeStroke);
     });
     svg.querySelectorAll('.edge polygon').forEach(el => {
-      if (isDefaultBlack(el.getAttribute('stroke'))) el.setAttribute('stroke', s.edgeArrow);
-      if (isDefaultBlack(el.getAttribute('fill')))   el.setAttribute('fill', s.edgeArrow);
+      if (isDefaultBlack(el.getAttribute('stroke'))) el.setAttribute('stroke',s.edgeArrow);
+      if (isDefaultBlack(el.getAttribute('fill')))   el.setAttribute('fill',s.edgeArrow);
     });
-    // Edge label text
     svg.querySelectorAll('.edge text').forEach(t => {
-      if (isDefaultBlack(t.getAttribute('fill'))) {
-        t.setAttribute('fill', s.text);
-      }
+      if (isDefaultBlack(t.getAttribute('fill'))) t.setAttribute('fill',s.text);
     });
   }
 
   function applyScheme(key) {
-    const s = SCHEMES[key];
-    if (!s) return;
+    const s = SCHEMES[key]; if (!s) return;
     currentScheme = key;
     localStorage.setItem('dotviewer-scheme', key);
     applySchemeUI(s);
     if (lastDotSource) renderDot(lastDotSource, lastDotName);
   }
-
   schemeSelect.addEventListener('change', () => applyScheme(schemeSelect.value));
 
-  // ── Rendering ──────────────────────────────────────────────────
+  // ── Graph analysis ─────────────────────────────────────────────────────
+  function getNodeCenter(nodeGroup) {
+    const ell = nodeGroup.querySelector('ellipse');
+    if (ell) return { x: +ell.getAttribute('cx'), y: +ell.getAttribute('cy') };
+    const poly = nodeGroup.querySelector('polygon');
+    if (poly) {
+      const pts = poly.getAttribute('points').trim().split(/\s+/)
+        .map(p => p.split(',').map(Number)).filter(p => p.length===2 && !isNaN(p[0]));
+      if (pts.length) return { x: pts.reduce((s,p)=>s+p[0],0)/pts.length, y: pts.reduce((s,p)=>s+p[1],0)/pts.length };
+    }
+    const rect = nodeGroup.querySelector('rect');
+    if (rect) return { x: +rect.getAttribute('x')+( +rect.getAttribute('width'))/2, y: +rect.getAttribute('y')+(+rect.getAttribute('height'))/2 };
+    try { const bb=nodeGroup.getBBox(); return {x:bb.x+bb.width/2,y:bb.y+bb.height/2}; } catch(e) { return {x:0,y:0}; }
+  }
+
+  function getClusterCenter(clusterId) {
+    const cl = graphData && graphData.clusters.get(clusterId);
+    if (!cl) return {x:0,y:0};
+    const poly = cl.group.querySelector(':scope > polygon');
+    if (poly) {
+      const pts = poly.getAttribute('points').trim().split(/\s+/)
+        .map(p=>p.split(',').map(Number)).filter(p=>p.length===2&&!isNaN(p[0]));
+      if (pts.length) return {x:pts.reduce((s,p)=>s+p[0],0)/pts.length, y:pts.reduce((s,p)=>s+p[1],0)/pts.length};
+    }
+    const sh = cl.group.querySelector(':scope > rect, :scope > path');
+    if (sh) { try { const bb=sh.getBBox(); return {x:bb.x+bb.width/2,y:bb.y+bb.height/2}; } catch(e){} }
+    return {x:0,y:0};
+  }
+
+  function analyzeGraph(svg) {
+    const nodes    = new Map();
+    const edges    = [];
+    const clusters = new Map();
+
+    // First pass: find clusters
+    svg.querySelectorAll('.cluster').forEach(group => {
+      const titleEl = group.querySelector(':scope > title');
+      const id = titleEl ? titleEl.textContent.trim() : '';
+      if (!id) return;
+      const labelEl = group.querySelector(':scope > text');
+      const label = labelEl ? labelEl.textContent.trim() : id;
+      clusters.set(id, { group, label, nodeIds: new Set(), childClusterIds: new Set(),
+        collapsed: false, hiddenNodes: [], hiddenEdges: [], proxyLines: [], placeholder: null,
+        origLabel: label });
+    });
+
+    // Nested cluster relationships
+    clusters.forEach((cA, idA) => {
+      clusters.forEach((cB, idB) => {
+        if (idA !== idB && cA.group.contains(cB.group)) cA.childClusterIds.add(idB);
+      });
+    });
+
+    // Second pass: find nodes
+    svg.querySelectorAll('.node').forEach(group => {
+      const titleEl = group.querySelector('title');
+      const id = titleEl ? titleEl.textContent.trim() : '';
+      if (!id) return;
+      const labelEl = group.querySelector('text');
+      const label = labelEl ? labelEl.textContent.trim() : id;
+      const center = getNodeCenter(group);
+
+      // Innermost cluster membership
+      let clusterId = null;
+      let par = group.parentElement;
+      while (par && par !== svg) {
+        if (par.classList && par.classList.contains('cluster')) {
+          const pt = par.querySelector(':scope > title');
+          clusterId = pt ? pt.textContent.trim() : null;
+          break;
+        }
+        par = par.parentElement;
+      }
+      nodes.set(id, { group, center, label, clusterId, dragDx: 0, dragDy: 0 });
+      if (clusterId && clusters.has(clusterId)) clusters.get(clusterId).nodeIds.add(id);
+    });
+
+    // Third pass: find edges
+    svg.querySelectorAll('.edge').forEach(group => {
+      const titleEl = group.querySelector('title');
+      const tt = titleEl ? titleEl.textContent.trim() : '';
+      const m = tt.match(/^(.+?)(?:->|--)(.+)$/);
+      if (m) {
+        const labelEl = group.querySelector('text');
+        edges.push({ group, from: m[1], to: m[2], label: labelEl ? labelEl.textContent.trim() : '', title: tt });
+      }
+    });
+
+    return { nodes, edges, clusters };
+  }
+
+  function getAllNodeIdsInCluster(clusterId) {
+    const cl = graphData.clusters.get(clusterId);
+    if (!cl) return new Set();
+    const result = new Set(cl.nodeIds);
+    cl.childClusterIds.forEach(cid => getAllNodeIdsInCluster(cid).forEach(id => result.add(id)));
+    return result;
+  }
+
+  function getSVGMainGroup() {
+    const svg = container.querySelector('svg');
+    return svg ? (svg.querySelector('g.graph') || svg.querySelector('g')) : null;
+  }
+
+  // ── Hover highlighting ─────────────────────────────────────────────────
+  function setupHoverHighlighting() {
+    if (!graphData) return;
+    graphData.nodes.forEach((nd, id) => {
+      nd.group.addEventListener('mouseenter', () => {
+        if (isDragging || searchQuery) return;
+        applyHoverHighlight(id);
+      });
+      nd.group.addEventListener('mouseleave', () => {
+        if (isDragging) return;
+        clearHoverHighlight();
+      });
+    });
+  }
+
+  function applyHoverHighlight(nodeId) {
+    if (!graphData) return;
+    const connEdges = graphData.edges.filter(e => e.from===nodeId||e.to===nodeId);
+    const connIds = new Set([nodeId]);
+    connEdges.forEach(e => { connIds.add(e.from); connIds.add(e.to); });
+    graphData.nodes.forEach((nd, id) => {
+      nd.group.classList.toggle('dimmed', !connIds.has(id));
+      nd.group.classList.toggle('hover-hl', connIds.has(id));
+    });
+    graphData.edges.forEach(ed => {
+      const connected = ed.from===nodeId||ed.to===nodeId;
+      ed.group.classList.toggle('dimmed', !connected);
+      ed.group.classList.toggle('hover-hl', connected);
+    });
+  }
+
+  function clearHoverHighlight() {
+    if (!graphData) return;
+    graphData.nodes.forEach(nd => nd.group.classList.remove('dimmed','hover-hl'));
+    graphData.edges.forEach(ed => ed.group.classList.remove('dimmed','hover-hl'));
+    if (searchQuery) applySearchHighlight(searchQuery);
+  }
+
+  // ── Click selection + info panel ───────────────────────────────────────
+  function setupClickSelection(svg) {
+    if (!graphData) return;
+    graphData.nodes.forEach((nd, id) => {
+      nd.group.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (isDragging) return;
+        if (selectedNodeId === id) deselectNode();
+        else selectNode(id);
+      });
+    });
+    // Click on background deselects
+    svg.addEventListener('click', () => { if (!isDragging) deselectNode(); });
+  }
+
+  function selectNode(id) {
+    deselectNode();
+    selectedNodeId = id;
+    const nd = graphData && graphData.nodes.get(id);
+    if (nd) nd.group.classList.add('selected');
+    showInfoPanel(id);
+  }
+
+  function deselectNode() {
+    if (selectedNodeId && graphData) {
+      const nd = graphData.nodes.get(selectedNodeId);
+      if (nd) nd.group.classList.remove('selected');
+    }
+    selectedNodeId = null;
+    infoPanel.classList.remove('visible');
+  }
+
+  function showInfoPanel(id) {
+    if (!graphData) return;
+    const nd = graphData.nodes.get(id);
+    if (!nd) return;
+    const s = SCHEMES[currentScheme];
+
+    document.getElementById('ip-label').textContent = nd.label || id;
+    document.getElementById('ip-id').textContent = 'id: ' + id;
+
+    // Cluster
+    const clWrap = document.getElementById('ip-cluster-wrap');
+    const clEl   = document.getElementById('ip-cluster');
+    if (nd.clusterId) {
+      const cl = graphData.clusters.get(nd.clusterId);
+      clEl.textContent = cl ? cl.label : nd.clusterId;
+      clEl.style.background = s.btn;
+      clEl.style.color = s.uiText;
+      clWrap.style.display = '';
+    } else {
+      clWrap.style.display = 'none';
+    }
+
+    // Connections
+    const incoming = graphData.edges.filter(e => e.to===id);
+    const outgoing = graphData.edges.filter(e => e.from===id);
+
+    document.getElementById('ip-in-count').textContent = incoming.length;
+    document.getElementById('ip-out-count').textContent = outgoing.length;
+
+    const inList  = document.getElementById('ip-in-list');
+    const outList = document.getElementById('ip-out-list');
+    inList.innerHTML = '';
+    outList.innerHTML = '';
+
+    const mkLi = (nodeId) => {
+      const li = document.createElement('li');
+      const n = graphData.nodes.get(nodeId);
+      li.textContent = (n ? n.label : nodeId) || nodeId;
+      li.style.cursor = 'pointer';
+      li.addEventListener('click', () => selectNode(nodeId));
+      return li;
+    };
+    if (incoming.length) incoming.forEach(e => inList.appendChild(mkLi(e.from)));
+    else { const li=document.createElement('li'); li.textContent='none'; li.className='ip-empty'; inList.appendChild(li); }
+    if (outgoing.length) outgoing.forEach(e => outList.appendChild(mkLi(e.to)));
+    else { const li=document.createElement('li'); li.textContent='none'; li.className='ip-empty'; outList.appendChild(li); }
+
+    infoPanel.classList.add('visible');
+  }
+
+  document.getElementById('ip-close').addEventListener('click', deselectNode);
+
+  // ── Progressive reveal (cluster collapse/expand) ───────────────────────
+  function setupClusterCollapse() {
+    if (!graphData) return;
+    graphData.clusters.forEach((cl, clusterId) => {
+      // Attach to the cluster polygon so dblclick on empty cluster space triggers it
+      const shape = cl.group.querySelector(':scope > polygon, :scope > rect, :scope > path');
+      if (shape) {
+        shape.style.cursor = 'pointer';
+        shape.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          if (cl.collapsed) expandCluster(clusterId);
+          else collapseCluster(clusterId);
+        });
+      }
+      // Also attach to the cluster title text
+      const titleText = cl.group.querySelector(':scope > text');
+      if (titleText) {
+        titleText.style.cursor = 'pointer';
+        titleText.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          if (cl.collapsed) expandCluster(clusterId);
+          else collapseCluster(clusterId);
+        });
+      }
+    });
+  }
+
+  function createProxyLine(x1, y1, x2, y2, clusterId) {
+    const mainG = getSVGMainGroup();
+    const s = SCHEMES[currentScheme];
+    const ns = 'http://www.w3.org/2000/svg';
+    const g = document.createElementNS(ns, 'g');
+    g.setAttribute('data-proxy-line', clusterId);
+    const line = document.createElementNS(ns, 'line');
+    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+    line.setAttribute('stroke', s.edgeStroke);
+    line.setAttribute('stroke-width', '1');
+    line.setAttribute('stroke-dasharray', '5,3');
+    line.setAttribute('opacity', '0.7');
+    g.appendChild(line);
+    mainG.appendChild(g);
+    return g;
+  }
+
+  function createPlaceholder(clusterId, nodeCount) {
+    const cl = graphData.clusters.get(clusterId);
+    if (!cl) return null;
+    const center = getClusterCenter(clusterId);
+    const s = SCHEMES[currentScheme];
+    const ns = 'http://www.w3.org/2000/svg';
+    const mainG = getSVGMainGroup();
+
+    const g = document.createElementNS(ns, 'g');
+    g.setAttribute('data-placeholder', clusterId);
+    g.style.cursor = 'pointer';
+
+    const W = 130, H = 34;
+    const rect = document.createElementNS(ns, 'rect');
+    rect.setAttribute('x', center.x - W/2);
+    rect.setAttribute('y', center.y - H/2);
+    rect.setAttribute('width', W);
+    rect.setAttribute('height', H);
+    rect.setAttribute('rx', '5');
+    rect.setAttribute('fill', s.clusterFill);
+    rect.setAttribute('stroke', s.overlayAccent);
+    rect.setAttribute('stroke-width', '1.5');
+    g.appendChild(rect);
+
+    // Text needs scale(1,-1) to counteract the parent group's Y-flip
+    const text = document.createElementNS(ns, 'text');
+    text.setAttribute('transform', 'scale(1,-1)');
+    text.setAttribute('x', center.x);
+    // After scale(1,-1) on this text, y_local maps to -y_local in parent space.
+    // We want visual center = center.y in parent space → need -center.y in local space.
+    text.setAttribute('y', -center.y);
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('dominant-baseline', 'middle');
+    text.setAttribute('fill', s.text);
+    text.setAttribute('font-size', '11');
+    text.setAttribute('font-family', 'sans-serif');
+    text.textContent = `${cl.label} (${nodeCount} nodes)`;
+    g.appendChild(text);
+
+    g.addEventListener('dblclick', (e) => { e.stopPropagation(); expandCluster(clusterId); });
+    mainG.appendChild(g);
+    return g;
+  }
+
+  function collapseCluster(clusterId) {
+    if (!graphData) return;
+    const cl = graphData.clusters.get(clusterId);
+    if (!cl || cl.collapsed) return;
+
+    const allIds = getAllNodeIdsInCluster(clusterId);
+
+    // Hide all nodes inside
+    cl.hiddenNodes = [];
+    allIds.forEach(id => {
+      const nd = graphData.nodes.get(id);
+      if (nd) { nd.group.style.display = 'none'; cl.hiddenNodes.push(nd.group); }
+    });
+
+    // Hide direct child cluster borders
+    cl.hiddenChildClusters = [];
+    cl.childClusterIds.forEach(cid => {
+      const child = graphData.clusters.get(cid);
+      if (child) { child.group.style.display = 'none'; cl.hiddenChildClusters.push(child.group); }
+    });
+
+    // Process edges
+    cl.hiddenEdges = [];
+    cl.proxyLines = [];
+    const center = getClusterCenter(clusterId);
+
+    graphData.edges.forEach(edge => {
+      const fIn = allIds.has(edge.from);
+      const tIn = allIds.has(edge.to);
+      if (fIn || tIn) {
+        edge.group.style.display = 'none';
+        cl.hiddenEdges.push(edge.group);
+        // Cross-boundary edge → proxy line
+        if (!(fIn && tIn)) {
+          const extId = fIn ? edge.to : edge.from;
+          const extNd = graphData.nodes.get(extId);
+          if (extNd) {
+            const line = createProxyLine(center.x, center.y, extNd.center.x, extNd.center.y, clusterId);
+            cl.proxyLines.push(line);
+          }
+        }
+      }
+    });
+
+    // Placeholder
+    cl.placeholder = createPlaceholder(clusterId, allIds.size);
+    cl.collapsed = true;
+  }
+
+  function expandCluster(clusterId) {
+    if (!graphData) return;
+    const cl = graphData.clusters.get(clusterId);
+    if (!cl || !cl.collapsed) return;
+
+    // Restore nodes
+    (cl.hiddenNodes || []).forEach(g => g.style.display = '');
+    // Restore child cluster groups
+    (cl.hiddenChildClusters || []).forEach(g => g.style.display = '');
+    // Restore edges
+    (cl.hiddenEdges || []).forEach(g => g.style.display = '');
+    // Remove proxy lines
+    (cl.proxyLines || []).forEach(g => g.remove());
+    // Remove placeholder
+    if (cl.placeholder) { cl.placeholder.remove(); cl.placeholder = null; }
+
+    cl.collapsed = false;
+    cl.hiddenNodes = [];
+    cl.hiddenEdges = [];
+    cl.proxyLines = [];
+    cl.hiddenChildClusters = [];
+  }
+
+  // ── Node dragging ──────────────────────────────────────────────────────
+  function setupNodeDragging(svg) {
+    if (!graphData) return;
+
+    graphData.nodes.forEach((nd, id) => {
+      let dragging = false;
+      let startPt = null;
+      let dx = 0, dy = 0;
+      let proxyEdges = [];
+
+      nd.group.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        e.preventDefault();
+        dragging = true;
+        isDragging = true;
+        if (panZoomInstance) panZoomInstance.disablePan();
+        nd.group.classList.remove('hover-hl','dimmed');
+
+        const mainG = getSVGMainGroup();
+        startPt = screenToSVG(e, mainG);
+        dx = 0; dy = 0;
+
+        // Create proxy lines for connected edges
+        proxyEdges = [];
+        graphData.edges.forEach(ed => {
+          if (ed.from===id || ed.to===id) {
+            ed.group.style.visibility = 'hidden';
+            const otherId = ed.from===id ? ed.to : ed.from;
+            const other = graphData.nodes.get(otherId);
+            if (other) {
+              const ns = 'http://www.w3.org/2000/svg';
+              const line = document.createElementNS(ns, 'line');
+              line.setAttribute('stroke', SCHEMES[currentScheme].edgeStroke);
+              line.setAttribute('stroke-width', '1');
+              line.setAttribute('opacity', '0.6');
+              line.setAttribute('data-drag-proxy', id);
+              updateProxyLine(line, nd, other, dx, dy);
+              mainG.appendChild(line);
+              proxyEdges.push({ line, other, isFrom: ed.from===id });
+            }
+          }
+        });
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        e.preventDefault();
+        const mainG = getSVGMainGroup();
+        const curPt = screenToSVG(e, mainG);
+        dx = curPt.x - startPt.x;
+        dy = curPt.y - startPt.y;
+        nd.group.setAttribute('transform', `translate(${dx},${dy})`);
+        proxyEdges.forEach(pe => updateProxyLine(pe.line, nd, pe.other, dx, dy));
+      });
+
+      document.addEventListener('mouseup', async (e) => {
+        if (!dragging) return;
+        dragging = false;
+        isDragging = false;
+        if (panZoomInstance) panZoomInstance.enablePan();
+
+        // Remove proxy lines, restore edge visibility
+        proxyEdges.forEach(pe => pe.line.remove());
+        proxyEdges = [];
+        graphData.edges.forEach(ed => {
+          if (ed.from===id || ed.to===id) ed.group.style.visibility = '';
+        });
+
+        // Store drag offset on this node
+        nd.dragDx = (nd.dragDx||0) + dx;
+        nd.dragDy = (nd.dragDy||0) + dy;
+        nd.group.setAttribute('transform', ''); // will be baked into pos
+
+        // Re-render with neato
+        await recomputeWithNeato();
+      });
+    });
+  }
+
+  function screenToSVG(e, group) {
+    const svg = container.querySelector('svg');
+    if (!svg || !group) return {x:0,y:0};
+    try {
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX; pt.y = e.clientY;
+      return pt.matrixTransform(group.getScreenCTM().inverse());
+    } catch(err) { return {x:0,y:0}; }
+  }
+
+  function updateProxyLine(line, nd, other, dx, dy) {
+    const ox = nd.center.x + dx, oy = nd.center.y + dy;
+    line.setAttribute('x1', ox);  line.setAttribute('y1', oy);
+    line.setAttribute('x2', other.center.x); line.setAttribute('y2', other.center.y);
+  }
+
+  async function recomputeWithNeato() {
+    if (!lastDotSource || !graphData) return;
+    // Collect current node positions (original center + accumulated drag)
+    const positions = new Map();
+    graphData.nodes.forEach((nd, id) => {
+      const cx = nd.center.x + (nd.dragDx||0);
+      const cy = nd.center.y + (nd.dragDy||0);
+      // Graphviz pos in points: X unchanged, Y negated (SVG Y is flipped)
+      positions.set(id, { x: cx, y: -cy });
+    });
+    const neatoSrc = buildNeatoSource(lastDotSource, positions);
+    await renderDot(lastDotSource, lastDotName, 'dot', neatoSrc);
+  }
+
+  function buildNeatoSource(original, positions) {
+    // Strip any existing pos attributes and inject new ones before closing }
+    let src = original.trimEnd();
+    // Ensure splines in graph attrs
+    src = src.replace(/\b(graph\s*\[)([^\]]*)\]/, (_, open, attrs) => {
+      attrs = attrs.replace(/\bsplines\s*=[^,\]]+[,]?\s*/g, '');
+      return `${open}${attrs ? attrs + ', ' : ''}splines=true]`;
+    });
+    if (!src.match(/\bgraph\s*\[/)) {
+      src = src.replace(/\{/, '{\n  graph [splines=true overlap=false];');
+    }
+    // Remove trailing }
+    if (src.endsWith('}')) src = src.slice(0, -1);
+    // Add position declarations
+    positions.forEach(({x, y}, id) => {
+      src += `\n  "${id}" [pos="${x.toFixed(2)},${y.toFixed(2)}!"];`;
+    });
+    src += '\n}';
+    return src;
+  }
+
+  // ── Search ─────────────────────────────────────────────────────────────
+  function applySearchHighlight(query) {
+    if (!graphData) return;
+    searchQuery = query;
+    if (!query) {
+      // Restore all
+      graphData.nodes.forEach(nd => nd.group.classList.remove('search-match','search-dim'));
+      graphData.edges.forEach(ed => ed.group.classList.remove('search-match','search-dim'));
+      searchCount.textContent = '';
+      return;
+    }
+    const q = query.toLowerCase();
+    let matches = 0;
+    const matchIds = new Set();
+    graphData.nodes.forEach((nd, id) => {
+      const hit = nd.label.toLowerCase().includes(q) || id.toLowerCase().includes(q);
+      nd.group.classList.toggle('search-match', hit);
+      nd.group.classList.toggle('search-dim', !hit);
+      if (hit) { matchIds.add(id); matches++; }
+    });
+    graphData.edges.forEach(ed => {
+      const visible = matchIds.has(ed.from) || matchIds.has(ed.to);
+      ed.group.classList.toggle('search-dim', !visible);
+    });
+    searchCount.textContent = `${matches}`;
+  }
+
+  searchInput.addEventListener('input', () => {
+    applySearchHighlight(searchInput.value.trim());
+  });
+
+  // ── Layout direction toggle ────────────────────────────────────────────
+  rankdirSel.value = currentRankdir;
+  rankdirSel.addEventListener('change', () => {
+    currentRankdir = rankdirSel.value;
+    if (lastDotSource) {
+      const modified = setRankdirInSource(lastDotSource, currentRankdir);
+      renderDot(modified, lastDotName, 'dot', null, /*updateSource*/false);
+    }
+  });
+
+  function setRankdirInSource(src, dir) {
+    // Replace existing rankdir
+    if (/rankdir\s*=\s*\w+/i.test(src)) {
+      return src.replace(/rankdir\s*=\s*\w+/i, `rankdir=${dir}`);
+    }
+    // Inject after first {
+    return src.replace(/\{/, `{\n  rankdir=${dir};`);
+  }
+
+  // ── Rendering ──────────────────────────────────────────────────────────
   function showError(msg) {
     errorEl.textContent = msg;
     errorEl.style.display = 'block';
     setTimeout(() => errorEl.style.display = 'none', 8000);
   }
 
-  async function renderDot(source, name) {
+  function getViz() {
+    if (!vizPromise) vizPromise = Viz.instance();
+    return vizPromise;
+  }
+
+  // renderDot(source, name, engine, overrideSrc, updateLastSource)
+  // - source: the canonical source to store as lastDotSource (when updateLastSource !== false)
+  // - overrideSrc: optional different source to actually render (for neato recompute / rankdir mod)
+  // - updateLastSource: if false, don't update lastDotSource
+  async function renderDot(source, name, engine, overrideSrc, updateLastSource) {
     errorEl.style.display = 'none';
-    lastDotSource = source;
-    lastDotName = name;
+    if (updateLastSource !== false) {
+      lastDotSource = source;
+      lastDotName = name;
+    }
+
+    const renderSrc = overrideSrc || source;
+    const renderEngine = engine || 'dot';
+
     try {
-      const viz = await Viz.instance();
-      const svg = viz.renderSVGElement(source);
+      const viz = await getViz();
+      const svg = viz.renderSVGElement(renderSrc, { engine: renderEngine });
 
       if (panZoomInstance) { panZoomInstance.destroy(); panZoomInstance = null; }
       container.innerHTML = '';
@@ -362,6 +1019,21 @@
 
       applySchemeToSVG(svg, SCHEMES[currentScheme]);
       container.appendChild(svg);
+
+      // Rebuild interactivity
+      graphData = analyzeGraph(svg);
+      setupHoverHighlighting();
+      setupClickSelection(svg);
+      setupClusterCollapse();
+      setupNodeDragging(svg);
+      if (searchQuery) applySearchHighlight(searchQuery);
+      if (selectedNodeId && graphData.nodes.has(selectedNodeId)) {
+        graphData.nodes.get(selectedNodeId).group.classList.add('selected');
+        showInfoPanel(selectedNodeId);
+      } else {
+        selectedNodeId = null;
+        infoPanel.classList.remove('visible');
+      }
 
       panZoomInstance = svgPanZoom(svg, {
         zoomEnabled: true, controlIconsEnabled: false,
@@ -374,32 +1046,37 @@
       filenameEl.textContent = name || '';
     } catch (e) {
       showError('Render error: ' + e.message);
+      // Reset viz instance on error so next render gets a fresh one
+      vizPromise = null;
     }
   }
 
-  // ── File handling ──────────────────────────────────────────────
+  // ── File handling ──────────────────────────────────────────────────────
   function readFile(file) {
     const reader = new FileReader();
-    reader.onload = () => renderDot(reader.result, file.name);
+    reader.onload = () => {
+      currentRankdir = 'TB';
+      rankdirSel.value = 'TB';
+      searchInput.value = '';
+      searchQuery = '';
+      renderDot(reader.result, file.name);
+    };
     reader.onerror = () => showError('Failed to read file');
     reader.readAsText(file);
   }
 
-  fileInput.addEventListener('change', (e) => {
-    if (e.target.files[0]) readFile(e.target.files[0]);
-  });
+  fileInput.addEventListener('change', (e) => { if (e.target.files[0]) readFile(e.target.files[0]); });
   overlay.addEventListener('click', () => fileInput.click());
 
-  // Drag and drop
   document.body.addEventListener('dragover', (e) => {
     e.preventDefault();
     overlay.classList.add('dragging');
     overlay.classList.remove('hidden');
     overlay.style.borderColor = SCHEMES[currentScheme].overlayAccent;
-    overlay.style.background = SCHEMES[currentScheme].overlayAccent + '18';
+    overlay.style.background  = SCHEMES[currentScheme].overlayAccent + '18';
   });
   document.body.addEventListener('dragleave', (e) => {
-    if (e.relatedTarget === null || !document.body.contains(e.relatedTarget)) {
+    if (e.relatedTarget===null || !document.body.contains(e.relatedTarget)) {
       overlay.classList.remove('dragging');
       overlay.style.background = '';
       if (panZoomInstance) overlay.classList.add('hidden');
@@ -414,7 +1091,7 @@
     if (file) readFile(file);
   });
 
-  // Toolbar buttons
+  // ── Toolbar buttons ────────────────────────────────────────────────────
   document.getElementById('btn-fit').addEventListener('click', () => {
     if (panZoomInstance) { panZoomInstance.fit(); panZoomInstance.center(); }
   });
@@ -424,18 +1101,29 @@
   document.getElementById('btn-zoom-out').addEventListener('click', () => {
     if (panZoomInstance) panZoomInstance.zoomOut();
   });
-
-  // Keyboard shortcuts
-  document.addEventListener('keydown', (e) => {
-    if (e.target === schemeSelect) return;
-    if (!panZoomInstance) return;
-    if (e.key === 'Home' || e.key === '0') { panZoomInstance.fit(); panZoomInstance.center(); }
-    if (e.key === '=' || e.key === '+') panZoomInstance.zoomIn();
-    if (e.key === '-') panZoomInstance.zoomOut();
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    if (lastDotSource) {
+      currentRankdir = 'TB';
+      rankdirSel.value = 'TB';
+      renderDot(lastDotSource, lastDotName, 'dot');
+    }
   });
 
-  // Apply initial scheme
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────
+  document.addEventListener('keydown', (e) => {
+    if (e.target === schemeSelect || e.target === rankdirSel || e.target === searchInput) return;
+    if (!panZoomInstance) return;
+    if (e.key==='Home'||e.key==='0') { panZoomInstance.fit(); panZoomInstance.center(); }
+    if (e.key==='='||e.key==='+') panZoomInstance.zoomIn();
+    if (e.key==='-') panZoomInstance.zoomOut();
+    if (e.key==='Escape') { deselectNode(); searchInput.value=''; applySearchHighlight(''); }
+  });
+
+  // ── Init ───────────────────────────────────────────────────────────────
   applyScheme(currentScheme);
+
+  // Eagerly warm up viz
+  getViz();
 
   // Auto-render if content was injected by dotview CLI script
   if (window.__DOT_CONTENT__) {
