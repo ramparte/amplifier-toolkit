@@ -105,8 +105,10 @@
   #info-panel .ip-list li::before { content: "→ "; opacity: 0.5; }
   #info-panel .ip-empty { font-size: 12px; opacity: 0.4; font-style: italic; }
   /* ── SVG interaction classes ── */
+  /* opacity transition only — NOT transform (which would fight the drag translate) */
   .node, .edge, .cluster { transition: opacity 0.15s ease; }
-  .node { cursor: pointer; }
+  /* Grab cursor on draggable things */
+  .node { cursor: grab; }
   .edge { cursor: pointer; }
   /* Hover dimming (lighter — used only when no focus mode is active) */
   .node.dimmed, .edge.dimmed { opacity: 0.13 !important; }
@@ -115,7 +117,6 @@
   .node.hover-hl > path { filter: brightness(1.4) drop-shadow(0 0 4px currentColor); }
   .edge.hover-hl path { stroke-width: 2.2px !important; }
   /* ── Focus mode (node click) ── */
-  /* Everything that is NOT in the local neighbourhood gets aggressively dimmed */
   .node.focus-dim, .edge.focus-dim { opacity: 0.08 !important; transition: opacity 0.15s ease; }
   /* The selected node: strong glow + thicker border */
   .node.focus-selected > ellipse, .node.focus-selected > polygon,
@@ -127,9 +128,7 @@
   .edge.focus-edge-hl path { stroke-width: 2.5px !important; filter: brightness(1.7); }
   .edge.focus-edge-hl polygon { filter: brightness(1.7); }
   /* ── Focus mode (cluster click) ── */
-  /* Edges that cross the cluster boundary: half-visible hint */
   .edge.focus-boundary { opacity: 0.35 !important; transition: opacity 0.15s ease; }
-  /* Cluster border glow when its contents are spotlighted */
   .cluster.focus-cluster > polygon, .cluster.focus-cluster > rect,
   .cluster.focus-cluster > path {
     stroke-width: 2.5px !important;
@@ -139,9 +138,11 @@
   .node.search-match > ellipse, .node.search-match > polygon, .node.search-match > rect,
   .node.search-match > path { filter: brightness(1.5) drop-shadow(0 0 5px var(--sel-glow, #58a6ff)); stroke-width: 2px !important; }
   .node.search-dim, .edge.search-dim { opacity: 0.1 !important; }
-  /* Cluster backgrounds are click-targets for focus */
-  .cluster > polygon, .cluster > rect, .cluster > path { cursor: pointer; }
+  /* Cluster backgrounds are drag/click targets */
+  .cluster > polygon, .cluster > rect, .cluster > path { cursor: grab; }
   g[data-proxy-line] { pointer-events: none; }
+  /* Wide invisible edge hit targets */
+  .edge-hit-target { pointer-events: stroke; fill: none; stroke: transparent; stroke-width: 20px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -165,7 +166,7 @@
     <input type="text" id="search-input" placeholder="Search nodes…">
     <span id="search-count"></span>
   </div>
-  <span class="help" id="help-text">scroll=zoom · drag=pan · click node=focus · click edge=follow · click cluster=spotlight · dblclick cluster=collapse</span>
+  <span class="help" id="help-text">scroll=zoom · drag=pan · click node=focus · hover=info · click edge=follow · click cluster=spotlight · dblclick cluster=collapse · drag node/cluster=move</span>
   <span class="filename" id="filename"></span>
 </div>
 
@@ -201,7 +202,7 @@
 <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
 <script>
 (function() {
-  // ── Color schemes ──────────────────────────────────────────────────────
+  // ── Color schemes ──────────────────────────────────────────────────────────
   const SCHEMES = {
     dark: {
       label: 'Dark',
@@ -277,7 +278,7 @@
     },
   };
 
-  // ── DOM refs ───────────────────────────────────────────────────────────
+  // ── DOM refs ───────────────────────────────────────────────────────────────
   const container    = document.getElementById('svg-container');
   const overlay      = document.getElementById('drop-overlay');
   const errorEl      = document.getElementById('error');
@@ -291,20 +292,20 @@
   const infoPanel    = document.getElementById('info-panel');
   const canvasEl     = document.getElementById('canvas');
 
-  // ── State ──────────────────────────────────────────────────────────────
+  // ── State ──────────────────────────────────────────────────────────────────
   let panZoomInstance = null;
   let currentScheme  = 'dark';
   let lastDotSource  = null;   // original untouched source
   let lastDotName    = null;
   let graphData      = null;   // { nodes, edges, clusters }
-  let selectedNodeId = null;
+  let selectedNodeId = null;   // persistently selected (via click)
   let searchQuery    = '';
   let currentRankdir = 'TB';
-  let isDragging       = false;
-  let vizPromise       = null;
-  let focusedClusterId = null;   // null = no cluster focus, else the spotlighted cluster id
+  let isDragging     = false;
+  let vizPromise     = null;
+  let focusedClusterId = null; // null = no cluster focus
 
-  // ── Color utilities ────────────────────────────────────────────────────
+  // ── Color utilities ────────────────────────────────────────────────────────
   function parseHexColor(str) {
     if (!str || typeof str !== 'string') return null;
     str = str.trim();
@@ -340,7 +341,7 @@
     return isLightColor(bgHex) ? s.darkText : s.text;
   }
 
-  // ── Scheme selector setup ──────────────────────────────────────────────
+  // ── Scheme selector setup ──────────────────────────────────────────────────
   for (const [key, s] of Object.entries(SCHEMES)) {
     const opt = document.createElement('option');
     opt.value = key; opt.textContent = 'Scheme: ' + s.label;
@@ -378,7 +379,7 @@
     document.documentElement.style.setProperty('--sel-glow', s.selGlow);
   }
 
-  // ── SVG recoloring (luminance-aware, preserved) ────────────────────────
+  // ── SVG recoloring ─────────────────────────────────────────────────────────
   function applySchemeToSVG(svg, s) {
     svg.querySelectorAll('.graph > polygon').forEach(p => {
       p.setAttribute('fill','none'); p.setAttribute('stroke','none');
@@ -432,7 +433,7 @@
   }
   schemeSelect.addEventListener('change', () => applyScheme(schemeSelect.value));
 
-  // ── Graph analysis ─────────────────────────────────────────────────────
+  // ── Graph analysis ─────────────────────────────────────────────────────────
   function getNodeCenter(nodeGroup) {
     const ell = nodeGroup.querySelector('ellipse');
     if (ell) return { x: +ell.getAttribute('cx'), y: +ell.getAttribute('cy') };
@@ -473,9 +474,15 @@
       if (!id) return;
       const labelEl = group.querySelector(':scope > text');
       const label = labelEl ? labelEl.textContent.trim() : id;
-      clusters.set(id, { group, label, nodeIds: new Set(), childClusterIds: new Set(),
+      clusters.set(id, {
+        group, label, nodeIds: new Set(), childClusterIds: new Set(),
         collapsed: false, hiddenNodes: [], hiddenEdges: [], proxyLines: [], placeholder: null,
-        origLabel: label });
+        origLabel: label,
+        // Drag state
+        dragDx: 0, dragDy: 0,
+        crossBoundaryProxies: [],   // proxy lines kept after cluster drag
+        hiddenEdgeGroupsForDrag: [] // edge groups hidden due to cluster drag
+      });
     });
 
     // Nested cluster relationships
@@ -505,7 +512,13 @@
         }
         par = par.parentElement;
       }
-      nodes.set(id, { group, center, label, clusterId, dragDx: 0, dragDy: 0 });
+      nodes.set(id, {
+        group, center, label, clusterId,
+        // Drag state
+        dragDx: 0, dragDy: 0,
+        persistentProxies: [],    // [{line, otherId}] – proxy lines kept after drop
+        hiddenEdgeGroups: []      // edge groups kept hidden after drag
+      });
       if (clusterId && clusters.has(clusterId)) clusters.get(clusterId).nodeIds.add(id);
     });
 
@@ -536,9 +549,62 @@
     return svg ? (svg.querySelector('g.graph') || svg.querySelector('g')) : null;
   }
 
-  // ── Focus mode helpers ───────────────────────────────────────────────────────
-  // Remove every focus-mode CSS class from all nodes/edges/clusters.
-  // Called before entering any new focus state.
+  // ── Effective center (accounting for node drag + ancestor cluster drags) ───
+  // This is the current visual SVG position of a node, factoring in all drag offsets.
+  function getEffectiveCenter(nd) {
+    let x = nd.center.x + (nd.dragDx || 0);
+    let y = nd.center.y + (nd.dragDy || 0);
+    // Walk up the DOM to add ancestor cluster drag offsets
+    let el = nd.group.parentElement;
+    const visited = new Set();
+    while (el) {
+      if (el.classList && el.classList.contains('cluster') && !visited.has(el)) {
+        visited.add(el);
+        const titleEl = el.querySelector(':scope > title');
+        if (titleEl) {
+          const cid = titleEl.textContent.trim();
+          const cl = graphData && graphData.clusters.get(cid);
+          if (cl) {
+            x += (cl.dragDx || 0);
+            y += (cl.dragDy || 0);
+          }
+        }
+      }
+      el = el.parentElement;
+    }
+    return { x, y };
+  }
+
+  // ── Refresh all persistent proxy lines ────────────────────────────────────
+  // Called after any drag ends to ensure all proxy lines reflect current positions.
+  function refreshAllProxyLines() {
+    if (!graphData) return;
+    // Node drag proxies
+    graphData.nodes.forEach((nd) => {
+      if (!nd.persistentProxies || nd.persistentProxies.length === 0) return;
+      const p1 = getEffectiveCenter(nd);
+      nd.persistentProxies.forEach(pe => {
+        const other = graphData.nodes.get(pe.otherId);
+        if (!other) return;
+        const p2 = getEffectiveCenter(other);
+        pe.line.setAttribute('x1', p1.x); pe.line.setAttribute('y1', p1.y);
+        pe.line.setAttribute('x2', p2.x); pe.line.setAttribute('y2', p2.y);
+      });
+    });
+    // Cluster drag proxies
+    graphData.clusters.forEach((cl) => {
+      if (!cl.crossBoundaryProxies || cl.crossBoundaryProxies.length === 0) return;
+      cl.crossBoundaryProxies.forEach(pe => {
+        if (!pe.fromNd || !pe.toNd) return;
+        const p1 = getEffectiveCenter(pe.fromNd);
+        const p2 = getEffectiveCenter(pe.toNd);
+        pe.line.setAttribute('x1', p1.x); pe.line.setAttribute('y1', p1.y);
+        pe.line.setAttribute('x2', p2.x); pe.line.setAttribute('y2', p2.y);
+      });
+    });
+  }
+
+  // ── Focus mode helpers ─────────────────────────────────────────────────────
   function clearFocusClasses() {
     if (!graphData) return;
     graphData.nodes.forEach(nd => nd.group.classList.remove(
@@ -550,7 +616,7 @@
     graphData.clusters.forEach(cl => cl.group.classList.remove('focus-cluster'));
   }
 
-  // Re-centre the viewport on the named node (instant — no animation required).
+  // Re-centre the viewport on the named node (instant — no animation).
   function panToNode(nodeId) {
     if (!panZoomInstance || !graphData) return;
     const nd = graphData.nodes.get(nodeId);
@@ -564,13 +630,12 @@
       const dy = canvasRect.height / 2 - nodeCY;
       const cur = panZoomInstance.getPan();
       panZoomInstance.pan({ x: cur.x + dx, y: cur.y + dy });
-      // Zoom in slightly if graph is very zoomed-out so the target node is legible
       const sizes = panZoomInstance.getSizes();
       if (sizes.realZoom < 0.7) panZoomInstance.zoom(1.1);
     } catch (e) { /* ignore */ }
   }
 
-  // Spotlight a cluster: dim everything outside it, boundary edges at reduced opacity.
+  // Spotlight a cluster: dim everything outside it.
   function focusCluster(clusterId) {
     if (!graphData) return;
     clearFocusClasses();
@@ -590,22 +655,33 @@
       const toIn   = allIds.has(ed.to);
       if      (!fromIn && !toIn)  ed.group.classList.add('focus-dim');
       else if (fromIn  !== toIn)  ed.group.classList.add('focus-boundary');
-      // both endpoints inside → fully visible, no class needed
     });
   }
 
-  // ── Hover highlighting ─────────────────────────────────────────────────
+  // ── Hover highlighting ─────────────────────────────────────────────────────
+  // Bug 1 fix: hover ALWAYS shows the info panel. The visual dimming effect is
+  // only applied when no focus mode is active (to avoid fighting with selection).
   function setupHoverHighlighting() {
     if (!graphData) return;
     graphData.nodes.forEach((nd, id) => {
       nd.group.addEventListener('mouseenter', () => {
-        // Suppress hover when any focus mode is active (focus provides its own dimming)
-        if (isDragging || searchQuery || selectedNodeId || focusedClusterId) return;
-        applyHoverHighlight(id);
+        if (isDragging) return;
+        // Always show info panel on hover (quick preview)
+        showInfoPanel(id, /*persistent=*/false);
+        // Visual dim/highlight only when no focus mode is active
+        if (!searchQuery && !selectedNodeId && !focusedClusterId) {
+          applyHoverHighlight(id);
+        }
       });
       nd.group.addEventListener('mouseleave', () => {
         if (isDragging) return;
         clearHoverHighlight();
+        // Restore persistent selection info, or hide the panel
+        if (selectedNodeId) {
+          showInfoPanel(selectedNodeId, /*persistent=*/true);
+        } else {
+          infoPanel.classList.remove('visible');
+        }
       });
     });
   }
@@ -633,7 +709,7 @@
     if (searchQuery) applySearchHighlight(searchQuery);
   }
 
-  // ── Click selection + info panel ───────────────────────────────────────
+  // ── Click selection + info panel ──────────────────────────────────────────
   function setupClickSelection(svg) {
     if (!graphData) return;
     graphData.nodes.forEach((nd, id) => {
@@ -649,7 +725,6 @@
   }
 
   function selectNode(id) {
-    // Clear any existing focus state (node or cluster)
     clearFocusClasses();
     infoPanel.classList.remove('visible');
 
@@ -659,26 +734,21 @@
     const nd = graphData && graphData.nodes.get(id);
     if (!nd) return;
 
-    // ── Focus spotlight: find the local neighbourhood ──
-    const connEdges  = graphData.edges.filter(e => e.from === id || e.to === id);
+    const connEdges   = graphData.edges.filter(e => e.from === id || e.to === id);
     const connNodeIds = new Set([id]);
     connEdges.forEach(e => { connNodeIds.add(e.from); connNodeIds.add(e.to); });
 
-    // Selected node: strong glow
     nd.group.classList.add('focus-selected');
 
-    // Neighbour nodes: keep fully visible (no class); everyone else dims aggressively
     graphData.nodes.forEach((node, nid) => {
       if (!connNodeIds.has(nid)) node.group.classList.add('focus-dim');
     });
-
-    // Connected edges: highlighted; all others dim
     graphData.edges.forEach(ed => {
       if (ed.from === id || ed.to === id) ed.group.classList.add('focus-edge-hl');
       else                                ed.group.classList.add('focus-dim');
     });
 
-    showInfoPanel(id);
+    showInfoPanel(id, /*persistent=*/true);
   }
 
   function deselectNode() {
@@ -688,7 +758,9 @@
     infoPanel.classList.remove('visible');
   }
 
-  function showInfoPanel(id) {
+  // showInfoPanel: populate and show the info panel.
+  // persistent=true means the panel was opened by a click and shouldn't auto-close on mouseleave.
+  function showInfoPanel(id, persistent) {
     if (!graphData) return;
     const nd = graphData.nodes.get(id);
     if (!nd) return;
@@ -740,49 +812,189 @@
 
   document.getElementById('ip-close').addEventListener('click', deselectNode);
 
-  // ── Progressive reveal (cluster collapse/expand) ───────────────────────
-  // Unified cluster interaction handler:
-  //   single-click  → spotlight focus (dims everything outside the cluster)
-  //   double-click  → collapse / expand (existing behaviour)
-  // A 240 ms debounce timer separates the two so a dblclick cancels the pending click action.
+  // ── Bug 2 fix: wide invisible edge hit targets ─────────────────────────────
+  // Adds a transparent 20px-wide path behind every edge path so it's easy to click.
+  function setupEdgeHitTargets(svg) {
+    const ns = 'http://www.w3.org/2000/svg';
+    svg.querySelectorAll('.edge').forEach(group => {
+      // Remove any stale hit targets from a previous render pass
+      group.querySelectorAll('.edge-hit-target').forEach(el => el.remove());
+      const paths = group.querySelectorAll('path');
+      paths.forEach(visPath => {
+        const d = visPath.getAttribute('d');
+        if (!d) return;
+        const hit = document.createElementNS(ns, 'path');
+        hit.setAttribute('d', d);
+        hit.setAttribute('class', 'edge-hit-target');
+        // Insert BEFORE the visible path so it doesn't block other interactions
+        group.insertBefore(hit, visPath);
+      });
+    });
+  }
+
+  // ── Progressive reveal (cluster collapse/expand) ───────────────────────────
   function setupClusterInteractions() {
     if (!graphData) return;
     graphData.clusters.forEach((cl, clusterId) => {
-      const shape = cl.group.querySelector(':scope > polygon, :scope > rect, :scope > path');
+      const shape     = cl.group.querySelector(':scope > polygon, :scope > rect, :scope > path');
       const titleText = cl.group.querySelector(':scope > text');
 
-      let clickTimer = null;
+      // State for double-click detection (timing-based, works with our mousedown approach)
+      let lastPointerUpTime = 0;
+      let singleClickTimer  = null;
 
-      const handleSingleClick = (e) => {
+      // Cluster mousedown: handles both drag and click/double-click.
+      // If mouse moves > 5px → drag. Otherwise → single/double click.
+      const handleClusterMouseDown = (e) => {
+        // If the actual target is a child node, let the node's own handler deal with it
+        if (e.target.closest && e.target.closest('.node')) return;
+        if (e.button !== 0) return;
         e.stopPropagation();
-        if (isDragging) return;
-        clearTimeout(clickTimer);
-        clickTimer = setTimeout(() => {
-          // Toggle: if this cluster is already focused, clear; otherwise focus it
-          if (focusedClusterId === clusterId) deselectNode();
-          else focusCluster(clusterId);
-        }, 240);
+
+        const mainG = getSVGMainGroup();
+        const startPt = screenToSVG(e, mainG);
+        // Save current drag offset so we can compute delta from this mousedown
+        const startDragDx = cl.dragDx || 0;
+        const startDragDy = cl.dragDy || 0;
+        let clDx = 0, clDy = 0;
+        let dragMode = false;
+        let tempProxies = [];
+        let hiddenForDrag = [];
+
+        const onMouseMove = (e2) => {
+          const curPt = screenToSVG(e2, mainG);
+          clDx = curPt.x - startPt.x;
+          clDy = curPt.y - startPt.y;
+
+          if (!dragMode && Math.hypot(clDx, clDy) > 5) {
+            // Crossed the threshold: enter drag mode
+            dragMode = true;
+            isDragging = true;
+            if (panZoomInstance) panZoomInstance.disablePan();
+            document.body.style.cursor = 'grabbing';
+
+            // Remove old cluster drag proxies
+            (cl.crossBoundaryProxies || []).forEach(p => p.remove());
+            cl.crossBoundaryProxies = [];
+            // Restore edges that were hidden by a previous cluster drag of this cluster
+            (cl.hiddenEdgeGroupsForDrag || []).forEach(eg => {
+              // Only restore if not also hidden by a node drag
+              eg.style.visibility = '';
+            });
+            cl.hiddenEdgeGroupsForDrag = [];
+
+            // Hide all edges connected to internal nodes; create proxy lines for all of them.
+            // (In Graphviz SVG, edge groups are NOT children of cluster groups,
+            //  so they don't move when the cluster group is translated.)
+            const allIds = getAllNodeIdsInCluster(clusterId);
+            const ns = 'http://www.w3.org/2000/svg';
+            graphData.edges.forEach(ed => {
+              const fIn = allIds.has(ed.from);
+              const tIn = allIds.has(ed.to);
+              if (fIn || tIn) {
+                ed.group.style.visibility = 'hidden';
+                hiddenForDrag.push(ed.group);
+                const fromNd = graphData.nodes.get(ed.from);
+                const toNd   = graphData.nodes.get(ed.to);
+                if (fromNd && toNd) {
+                  const line = document.createElementNS(ns, 'line');
+                  const s = SCHEMES[currentScheme];
+                  line.setAttribute('stroke', s.edgeStroke);
+                  line.setAttribute('stroke-width', '1.2');
+                  line.setAttribute('opacity', '0.7');
+                  if (!fIn || !tIn) {
+                    // Cross-boundary: dashed
+                    line.setAttribute('stroke-dasharray', '5,3');
+                    line.setAttribute('opacity', '0.5');
+                  }
+                  getSVGMainGroup().appendChild(line);
+                  tempProxies.push({ line, fromNd, toNd });
+                }
+              }
+            });
+          }
+
+          if (dragMode) {
+            cl.dragDx = startDragDx + clDx;
+            cl.dragDy = startDragDy + clDy;
+            cl.group.setAttribute('transform', `translate(${cl.dragDx},${cl.dragDy})`);
+            // Update proxy lines using effective centers (which now include updated cl.dragDx/Dy)
+            tempProxies.forEach(pe => {
+              const p1 = getEffectiveCenter(pe.fromNd);
+              const p2 = getEffectiveCenter(pe.toNd);
+              pe.line.setAttribute('x1', p1.x); pe.line.setAttribute('y1', p1.y);
+              pe.line.setAttribute('x2', p2.x); pe.line.setAttribute('y2', p2.y);
+            });
+            // Also refresh node drag proxies for nodes inside this cluster
+            refreshAllProxyLines();
+          }
+        };
+
+        const onMouseUp = () => {
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+
+          if (dragMode) {
+            // Finalize drag: cl.dragDx/Dy already up-to-date from mousemove
+            cl.group.setAttribute('transform', `translate(${cl.dragDx},${cl.dragDy})`);
+            cl.crossBoundaryProxies = tempProxies;
+            cl.hiddenEdgeGroupsForDrag = hiddenForDrag;
+            refreshAllProxyLines();
+            setTimeout(() => { isDragging = false; }, 50);
+            if (panZoomInstance) panZoomInstance.enablePan();
+            document.body.style.cursor = '';
+          } else {
+            // Was a click (mouse barely moved) — detect single vs double click
+            cl.dragDx = startDragDx; // ensure no drift from tiny movements
+            cl.dragDy = startDragDy;
+            const now = Date.now();
+            if (now - lastPointerUpTime < 300) {
+              // Double-click: collapse/expand
+              clearTimeout(singleClickTimer);
+              singleClickTimer = null;
+              lastPointerUpTime = 0;
+              if (cl.collapsed) expandCluster(clusterId);
+              else collapseCluster(clusterId);
+            } else {
+              lastPointerUpTime = now;
+              clearTimeout(singleClickTimer);
+              singleClickTimer = setTimeout(() => {
+                if (focusedClusterId === clusterId) deselectNode();
+                else focusCluster(clusterId);
+              }, 300);
+            }
+          }
+        };
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
       };
 
-      const handleDblClick = (e) => {
-        e.stopPropagation();
-        clearTimeout(clickTimer); // cancel the pending single-click action
-        if (cl.collapsed) expandCluster(clusterId);
-        else collapseCluster(clusterId);
-      };
+      if (shape) shape.addEventListener('mousedown', handleClusterMouseDown);
 
-      if (shape) {
-        shape.addEventListener('click',    handleSingleClick);
-        shape.addEventListener('dblclick', handleDblClick);
-      }
+      // Title text: keep click/dblclick for label area (simpler interaction on text)
       if (titleText) {
         titleText.style.cursor = 'pointer';
-        titleText.addEventListener('dblclick', handleDblClick);
+        let titleClickTimer = null;
+        titleText.addEventListener('click', (e) => {
+          e.stopPropagation();
+          clearTimeout(titleClickTimer);
+          titleClickTimer = setTimeout(() => {
+            if (focusedClusterId === clusterId) deselectNode();
+            else focusCluster(clusterId);
+          }, 300);
+        });
+        titleText.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          clearTimeout(titleClickTimer);
+          if (cl.collapsed) expandCluster(clusterId);
+          else collapseCluster(clusterId);
+        });
       }
     });
   }
 
-  // Edge click → "follow the arrow": pan to the target node and select it.
+  // Edge click → "follow the arrow": pan to target node and select it.
   function setupEdgeClicks() {
     if (!graphData) return;
     graphData.edges.forEach(ed => {
@@ -843,8 +1055,6 @@
     const text = document.createElementNS(ns, 'text');
     text.setAttribute('transform', 'scale(1,-1)');
     text.setAttribute('x', center.x);
-    // After scale(1,-1) on this text, y_local maps to -y_local in parent space.
-    // We want visual center = center.y in parent space → need -center.y in local space.
     text.setAttribute('y', -center.y);
     text.setAttribute('text-anchor', 'middle');
     text.setAttribute('dominant-baseline', 'middle');
@@ -866,21 +1076,18 @@
 
     const allIds = getAllNodeIdsInCluster(clusterId);
 
-    // Hide all nodes inside
     cl.hiddenNodes = [];
     allIds.forEach(id => {
       const nd = graphData.nodes.get(id);
       if (nd) { nd.group.style.display = 'none'; cl.hiddenNodes.push(nd.group); }
     });
 
-    // Hide direct child cluster borders
     cl.hiddenChildClusters = [];
     cl.childClusterIds.forEach(cid => {
       const child = graphData.clusters.get(cid);
       if (child) { child.group.style.display = 'none'; cl.hiddenChildClusters.push(child.group); }
     });
 
-    // Process edges
     cl.hiddenEdges = [];
     cl.proxyLines = [];
     const center = getClusterCenter(clusterId);
@@ -891,7 +1098,6 @@
       if (fIn || tIn) {
         edge.group.style.display = 'none';
         cl.hiddenEdges.push(edge.group);
-        // Cross-boundary edge → proxy line
         if (!(fIn && tIn)) {
           const extId = fIn ? edge.to : edge.from;
           const extNd = graphData.nodes.get(extId);
@@ -903,7 +1109,6 @@
       }
     });
 
-    // Placeholder
     cl.placeholder = createPlaceholder(clusterId, allIds.size);
     cl.collapsed = true;
   }
@@ -913,15 +1118,10 @@
     const cl = graphData.clusters.get(clusterId);
     if (!cl || !cl.collapsed) return;
 
-    // Restore nodes
     (cl.hiddenNodes || []).forEach(g => g.style.display = '');
-    // Restore child cluster groups
     (cl.hiddenChildClusters || []).forEach(g => g.style.display = '');
-    // Restore edges
     (cl.hiddenEdges || []).forEach(g => g.style.display = '');
-    // Remove proxy lines
     (cl.proxyLines || []).forEach(g => g.remove());
-    // Remove placeholder
     if (cl.placeholder) { cl.placeholder.remove(); cl.placeholder = null; }
 
     cl.collapsed = false;
@@ -931,46 +1131,68 @@
     cl.hiddenChildClusters = [];
   }
 
-  // ── Node dragging ──────────────────────────────────────────────────────
+  // ── Bug 3 fix: node dragging with persistent position ─────────────────────
+  // Instead of re-rendering with neato on drop, we keep the translated position.
+  // The trade-off is straight proxy lines instead of splines for moved edges.
+  // "Reset Layout" re-renders from original source to get splines back.
   function setupNodeDragging(svg) {
     if (!graphData) return;
 
     graphData.nodes.forEach((nd, id) => {
-      let dragging = false;
-      let startPt = null;
-      let dx = 0, dy = 0;
-      let proxyEdges = [];
+      let dragging  = false;
+      let startPt   = null;
+      let startDragDx = 0;
+      let startDragDy = 0;
+      let tempProxies = []; // proxy lines active only during this drag gesture
 
       nd.group.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         e.stopPropagation();
         e.preventDefault();
-        dragging = true;
-        isDragging = true;
+        dragging    = true;
+        isDragging  = true;
         if (panZoomInstance) panZoomInstance.disablePan();
-        nd.group.classList.remove('hover-hl','dimmed');
+        nd.group.classList.remove('hover-hl', 'dimmed');
+        document.body.style.cursor = 'grabbing';
 
         const mainG = getSVGMainGroup();
-        startPt = screenToSVG(e, mainG);
-        dx = 0; dy = 0;
+        startPt     = screenToSVG(e, mainG);
+        startDragDx = nd.dragDx || 0;
+        startDragDy = nd.dragDy || 0;
 
-        // Create proxy lines for connected edges
-        proxyEdges = [];
+        // Remove old persistent proxies for this node (we'll create fresh ones)
+        if (nd.persistentProxies && nd.persistentProxies.length > 0) {
+          nd.persistentProxies.forEach(pe => pe.line.remove());
+          nd.persistentProxies = [];
+        }
+
+        // Create proxy lines for all connected edges
+        tempProxies = [];
         graphData.edges.forEach(ed => {
-          if (ed.from===id || ed.to===id) {
+          if (ed.from === id || ed.to === id) {
             ed.group.style.visibility = 'hidden';
-            const otherId = ed.from===id ? ed.to : ed.from;
-            const other = graphData.nodes.get(otherId);
+            // Track as hidden (so they stay hidden after drop)
+            if (!nd.hiddenEdgeGroups.includes(ed.group)) {
+              nd.hiddenEdgeGroups.push(ed.group);
+            }
+            const otherId = ed.from === id ? ed.to : ed.from;
+            const other   = graphData.nodes.get(otherId);
             if (other) {
-              const ns = 'http://www.w3.org/2000/svg';
+              const ns   = 'http://www.w3.org/2000/svg';
               const line = document.createElementNS(ns, 'line');
-              line.setAttribute('stroke', SCHEMES[currentScheme].edgeStroke);
-              line.setAttribute('stroke-width', '1');
-              line.setAttribute('opacity', '0.6');
+              const s    = SCHEMES[currentScheme];
+              line.setAttribute('stroke', s.edgeStroke);
+              line.setAttribute('stroke-width', '1.2');
+              line.setAttribute('stroke-dasharray', '4,3');
+              line.setAttribute('opacity', '0.7');
               line.setAttribute('data-drag-proxy', id);
-              updateProxyLine(line, nd, other, dx, dy);
+              // Set initial position
+              const p1 = getEffectiveCenter(nd);
+              const p2 = getEffectiveCenter(other);
+              line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
+              line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
               mainG.appendChild(line);
-              proxyEdges.push({ line, other, isFrom: ed.from===id });
+              tempProxies.push({ line, otherId });
             }
           }
         });
@@ -981,32 +1203,43 @@
         e.preventDefault();
         const mainG = getSVGMainGroup();
         const curPt = screenToSVG(e, mainG);
-        dx = curPt.x - startPt.x;
-        dy = curPt.y - startPt.y;
-        nd.group.setAttribute('transform', `translate(${dx},${dy})`);
-        proxyEdges.forEach(pe => updateProxyLine(pe.line, nd, pe.other, dx, dy));
+        const curDx = curPt.x - startPt.x;
+        const curDy = curPt.y - startPt.y;
+
+        // Update live dragDx/Dy so getEffectiveCenter gives current position
+        nd.dragDx = startDragDx + curDx;
+        nd.dragDy = startDragDy + curDy;
+        nd.group.setAttribute('transform', `translate(${nd.dragDx},${nd.dragDy})`);
+
+        // Update proxy line endpoints
+        const p1 = getEffectiveCenter(nd); // uses updated nd.dragDx/Dy
+        tempProxies.forEach(pe => {
+          const other = graphData.nodes.get(pe.otherId);
+          if (!other) return;
+          const p2 = getEffectiveCenter(other);
+          pe.line.setAttribute('x1', p1.x); pe.line.setAttribute('y1', p1.y);
+          pe.line.setAttribute('x2', p2.x); pe.line.setAttribute('y2', p2.y);
+        });
+        // Also refresh cluster proxy lines in case we moved a node inside one
+        refreshAllProxyLines();
       });
 
-      document.addEventListener('mouseup', async (e) => {
+      document.addEventListener('mouseup', () => {
         if (!dragging) return;
         dragging = false;
-        isDragging = false;
+        setTimeout(() => { isDragging = false; }, 50);
         if (panZoomInstance) panZoomInstance.enablePan();
+        document.body.style.cursor = '';
 
-        // Remove proxy lines, restore edge visibility
-        proxyEdges.forEach(pe => pe.line.remove());
-        proxyEdges = [];
-        graphData.edges.forEach(ed => {
-          if (ed.from===id || ed.to===id) ed.group.style.visibility = '';
-        });
+        // nd.dragDx/Dy already at their final values from mousemove
+        nd.group.setAttribute('transform', `translate(${nd.dragDx},${nd.dragDy})`);
 
-        // Store drag offset on this node
-        nd.dragDx = (nd.dragDx||0) + dx;
-        nd.dragDy = (nd.dragDy||0) + dy;
-        nd.group.setAttribute('transform', ''); // will be baked into pos
+        // Persist the proxy lines (they remain visible as straight-line edges)
+        nd.persistentProxies = tempProxies;
+        tempProxies = [];
 
-        // Re-render with neato
-        await recomputeWithNeato();
+        // Final refresh to ensure all lines are positioned correctly
+        refreshAllProxyLines();
       });
     });
   }
@@ -1021,53 +1254,11 @@
     } catch(err) { return {x:0,y:0}; }
   }
 
-  function updateProxyLine(line, nd, other, dx, dy) {
-    const ox = nd.center.x + dx, oy = nd.center.y + dy;
-    line.setAttribute('x1', ox);  line.setAttribute('y1', oy);
-    line.setAttribute('x2', other.center.x); line.setAttribute('y2', other.center.y);
-  }
-
-  async function recomputeWithNeato() {
-    if (!lastDotSource || !graphData) return;
-    // Collect current node positions (original center + accumulated drag)
-    const positions = new Map();
-    graphData.nodes.forEach((nd, id) => {
-      const cx = nd.center.x + (nd.dragDx||0);
-      const cy = nd.center.y + (nd.dragDy||0);
-      // Graphviz pos in points: X unchanged, Y negated (SVG Y is flipped)
-      positions.set(id, { x: cx, y: -cy });
-    });
-    const neatoSrc = buildNeatoSource(lastDotSource, positions);
-    await renderDot(lastDotSource, lastDotName, 'dot', neatoSrc);
-  }
-
-  function buildNeatoSource(original, positions) {
-    // Strip any existing pos attributes and inject new ones before closing }
-    let src = original.trimEnd();
-    // Ensure splines in graph attrs
-    src = src.replace(/\b(graph\s*\[)([^\]]*)\]/, (_, open, attrs) => {
-      attrs = attrs.replace(/\bsplines\s*=[^,\]]+[,]?\s*/g, '');
-      return `${open}${attrs ? attrs + ', ' : ''}splines=true]`;
-    });
-    if (!src.match(/\bgraph\s*\[/)) {
-      src = src.replace(/\{/, '{\n  graph [splines=true overlap=false];');
-    }
-    // Remove trailing }
-    if (src.endsWith('}')) src = src.slice(0, -1);
-    // Add position declarations
-    positions.forEach(({x, y}, id) => {
-      src += `\n  "${id}" [pos="${x.toFixed(2)},${y.toFixed(2)}!"];`;
-    });
-    src += '\n}';
-    return src;
-  }
-
-  // ── Search ─────────────────────────────────────────────────────────────
+  // ── Search ─────────────────────────────────────────────────────────────────
   function applySearchHighlight(query) {
     if (!graphData) return;
     searchQuery = query;
     if (!query) {
-      // Restore all
       graphData.nodes.forEach(nd => nd.group.classList.remove('search-match','search-dim'));
       graphData.edges.forEach(ed => ed.group.classList.remove('search-match','search-dim'));
       searchCount.textContent = '';
@@ -1093,7 +1284,7 @@
     applySearchHighlight(searchInput.value.trim());
   });
 
-  // ── Layout direction toggle ────────────────────────────────────────────
+  // ── Layout direction toggle ────────────────────────────────────────────────
   rankdirSel.value = currentRankdir;
   rankdirSel.addEventListener('change', () => {
     currentRankdir = rankdirSel.value;
@@ -1104,15 +1295,13 @@
   });
 
   function setRankdirInSource(src, dir) {
-    // Replace existing rankdir
     if (/rankdir\s*=\s*\w+/i.test(src)) {
       return src.replace(/rankdir\s*=\s*\w+/i, `rankdir=${dir}`);
     }
-    // Inject after first {
     return src.replace(/\{/, `{\n  rankdir=${dir};`);
   }
 
-  // ── Rendering ──────────────────────────────────────────────────────────
+  // ── Rendering ──────────────────────────────────────────────────────────────
   function showError(msg) {
     errorEl.textContent = msg;
     errorEl.style.display = 'block';
@@ -1124,10 +1313,6 @@
     return vizPromise;
   }
 
-  // renderDot(source, name, engine, overrideSrc, updateLastSource)
-  // - source: the canonical source to store as lastDotSource (when updateLastSource !== false)
-  // - overrideSrc: optional different source to actually render (for neato recompute / rankdir mod)
-  // - updateLastSource: if false, don't update lastDotSource
   async function renderDot(source, name, engine, overrideSrc, updateLastSource) {
     errorEl.style.display = 'none';
     if (updateLastSource !== false) {
@@ -1135,7 +1320,7 @@
       lastDotName = name;
     }
 
-    const renderSrc = overrideSrc || source;
+    const renderSrc    = overrideSrc || source;
     const renderEngine = engine || 'dot';
 
     try {
@@ -1158,11 +1343,13 @@
       setupClickSelection(svg);
       setupClusterInteractions();
       setupEdgeClicks();
+      setupEdgeHitTargets(svg);   // Bug 2: add wide hit targets to edges
       setupNodeDragging(svg);
+
       if (searchQuery) applySearchHighlight(searchQuery);
       if (selectedNodeId && graphData.nodes.has(selectedNodeId)) {
         graphData.nodes.get(selectedNodeId).group.classList.add('selected');
-        showInfoPanel(selectedNodeId);
+        showInfoPanel(selectedNodeId, /*persistent=*/true);
       } else {
         selectedNodeId = null;
         infoPanel.classList.remove('visible');
@@ -1179,12 +1366,11 @@
       filenameEl.textContent = name || '';
     } catch (e) {
       showError('Render error: ' + e.message);
-      // Reset viz instance on error so next render gets a fresh one
       vizPromise = null;
     }
   }
 
-  // ── File handling ──────────────────────────────────────────────────────
+  // ── File handling ──────────────────────────────────────────────────────────
   function readFile(file) {
     const reader = new FileReader();
     reader.onload = () => {
@@ -1224,7 +1410,7 @@
     if (file) readFile(file);
   });
 
-  // ── Toolbar buttons ────────────────────────────────────────────────────
+  // ── Toolbar buttons ────────────────────────────────────────────────────────
   document.getElementById('btn-fit').addEventListener('click', () => {
     if (panZoomInstance) { panZoomInstance.fit(); panZoomInstance.center(); }
   });
@@ -1242,7 +1428,7 @@
     }
   });
 
-  // ── Keyboard shortcuts ─────────────────────────────────────────────────
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   document.addEventListener('keydown', (e) => {
     if (e.target === schemeSelect || e.target === rankdirSel || e.target === searchInput) return;
     if (!panZoomInstance) return;
@@ -1252,7 +1438,7 @@
     if (e.key==='Escape') { deselectNode(); searchInput.value=''; applySearchHighlight(''); }
   });
 
-  // ── Init ───────────────────────────────────────────────────────────────
+  // ── Init ───────────────────────────────────────────────────────────────────
   applyScheme(currentScheme);
 
   // Eagerly warm up viz
