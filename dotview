@@ -1,0 +1,47 @@
+#!/bin/bash
+# dotview - open a .dot file in the browser viewer
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VIEWER="$SCRIPT_DIR/dotviewer.html"
+
+if [ -z "$1" ]; then
+    echo "Usage: dotview <file.dot>"
+    exit 1
+fi
+
+DOT_FILE="$(realpath "$1")"
+
+if [ ! -f "$DOT_FILE" ]; then
+    echo "File not found: $1"
+    exit 1
+fi
+
+# Create temp HTML with the dot content embedded
+TMPFILE=$(mktemp /tmp/dotview-XXXXXX.html)
+cp "$VIEWER" "$TMPFILE"
+
+FILENAME=$(basename "$DOT_FILE")
+
+# Inject dot content as a JS variable before </body>
+python3 -c "
+import sys, json
+
+dot = open(sys.argv[1]).read()
+name = sys.argv[2]
+html = open(sys.argv[3]).read()
+
+inject = f'<script>window.__DOT_CONTENT__={json.dumps(dot)};window.__DOT_FILENAME__={json.dumps(name)};</script>'
+html = html.replace('</body>', inject + '</body>')
+
+open(sys.argv[3], 'w').write(html)
+" "$DOT_FILE" "$FILENAME" "$TMPFILE"
+
+# Open in browser (WSL2-aware)
+if command -v wslview &>/dev/null; then
+    wslview "$TMPFILE"
+elif command -v xdg-open &>/dev/null; then
+    xdg-open "$TMPFILE"
+else
+    echo "Open in browser: $TMPFILE"
+fi

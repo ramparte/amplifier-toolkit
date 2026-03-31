@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dot Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: background 0.2s;
+  }
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    flex-shrink: 0;
+    transition: background 0.2s, border-color 0.2s;
+  }
+  #toolbar button, #toolbar label, #toolbar select {
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    border: 1px solid;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+  }
+  #toolbar select { padding: 5px 10px; }
+  #toolbar .filename { font-size: 13px; margin-left: auto; }
+  #toolbar .help { font-size: 12px; }
+  #file-input { display: none; }
+  #canvas { flex: 1; position: relative; overflow: hidden; }
+  #svg-container { width: 100%; height: 100%; }
+  #svg-container svg { width: 100%; height: 100%; }
+  #drop-overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 16px; pointer-events: none;
+  }
+  #drop-overlay.empty { pointer-events: auto; cursor: pointer; }
+  #drop-overlay .msg { font-size: 20px; }
+  #drop-overlay .sub { font-size: 14px; }
+  #drop-overlay.dragging { border: 3px dashed; }
+  #drop-overlay.hidden { display: none; }
+  #error {
+    position: absolute; bottom: 16px; left: 16px; right: 16px;
+    background: #4a0000; color: #ff6b6b;
+    padding: 10px 14px; border-radius: 4px; font-size: 13px;
+    display: none; white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <label for="file-input">Open .dot file</label>
+  <input type="file" id="file-input" accept=".dot,.gv,.graphviz,text/plain">
+  <button id="btn-fit">Fit (Home)</button>
+  <button id="btn-zoom-in">+</button>
+  <button id="btn-zoom-out">-</button>
+  <select id="scheme-select"></select>
+  <span class="help">scroll=zoom, drag=pan</span>
+  <span class="filename" id="filename"></span>
+</div>
+
+<div id="canvas">
+  <div id="svg-container"></div>
+  <div id="drop-overlay" class="empty">
+    <div class="msg">Drop a .dot file here</div>
+    <div class="sub">or click "Open .dot file" above</div>
+  </div>
+  <div id="error"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@viz-js/viz@3.11.0/lib/viz-standalone.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+<script>
+(function() {
+  // ── Color schemes ──────────────────────────────────────────────
+  const SCHEMES = {
+    dark: {
+      label: 'Dark',
+      bg: '#1a1a2e', toolbar: '#16213e', toolbarBorder: '#0f3460',
+      btn: '#0f3460', btnBorder: '#533483', btnHover: '#533483',
+      uiText: '#e0e0e0', dimText: '#7f8c8d', hintText: '#555',
+      overlayAccent: '#533483',
+      nodeFill: '#2a2a4a', nodeStroke: '#8899bb',
+      edgeStroke: '#8899bb', edgeArrow: '#8899bb',
+      text: '#e0e0e0', darkText: '#1a1a2e',
+      clusterFill: '#222244', clusterStroke: '#667799',
+    },
+    light: {
+      label: 'Light',
+      bg: '#f5f5f5', toolbar: '#ffffff', toolbarBorder: '#ddd',
+      btn: '#e8e8e8', btnBorder: '#ccc', btnHover: '#d0d0d0',
+      uiText: '#333', dimText: '#888', hintText: '#aaa',
+      overlayAccent: '#888',
+      nodeFill: '#ffffff', nodeStroke: '#333333',
+      edgeStroke: '#555555', edgeArrow: '#555555',
+      text: '#222222', darkText: '#222222',
+      clusterFill: '#f0f0f0', clusterStroke: '#999999',
+    },
+    midnight: {
+      label: 'Midnight',
+      bg: '#0d1117', toolbar: '#161b22', toolbarBorder: '#30363d',
+      btn: '#21262d', btnBorder: '#30363d', btnHover: '#30363d',
+      uiText: '#c9d1d9', dimText: '#6e7681', hintText: '#484f58',
+      overlayAccent: '#58a6ff',
+      nodeFill: '#161b22', nodeStroke: '#58a6ff',
+      edgeStroke: '#58a6ff', edgeArrow: '#58a6ff',
+      text: '#c9d1d9', darkText: '#0d1117',
+      clusterFill: '#0d1117', clusterStroke: '#30363d',
+    },
+    solarized: {
+      label: 'Solarized Dark',
+      bg: '#002b36', toolbar: '#073642', toolbarBorder: '#586e75',
+      btn: '#073642', btnBorder: '#586e75', btnHover: '#586e75',
+      uiText: '#93a1a1', dimText: '#657b83', hintText: '#586e75',
+      overlayAccent: '#268bd2',
+      nodeFill: '#073642', nodeStroke: '#93a1a1',
+      edgeStroke: '#839496', edgeArrow: '#839496',
+      text: '#eee8d5', darkText: '#002b36',
+      clusterFill: '#002b36', clusterStroke: '#586e75',
+    },
+    blueprint: {
+      label: 'Blueprint',
+      bg: '#0a1929', toolbar: '#0d2137', toolbarBorder: '#1a3a5c',
+      btn: '#122d4d', btnBorder: '#1a3a5c', btnHover: '#1a3a5c',
+      uiText: '#b0d4f1', dimText: '#4a7aa8', hintText: '#2d5a85',
+      overlayAccent: '#4fc3f7',
+      nodeFill: '#0d2137', nodeStroke: '#4fc3f7',
+      edgeStroke: '#4fc3f7', edgeArrow: '#4fc3f7',
+      text: '#e1f5fe', darkText: '#0a1929',
+      clusterFill: '#0a1929', clusterStroke: '#1a3a5c',
+    },
+    highContrast: {
+      label: 'High Contrast',
+      bg: '#000000', toolbar: '#1a1a1a', toolbarBorder: '#444',
+      btn: '#2a2a2a', btnBorder: '#555', btnHover: '#444',
+      uiText: '#ffffff', dimText: '#aaa', hintText: '#666',
+      overlayAccent: '#ffff00',
+      nodeFill: '#1a1a1a', nodeStroke: '#ffffff',
+      edgeStroke: '#ffff00', edgeArrow: '#ffff00',
+      text: '#ffffff', darkText: '#000000',
+      clusterFill: '#0a0a0a', clusterStroke: '#666666',
+    },
+  };
+
+  const container = document.getElementById('svg-container');
+  const overlay = document.getElementById('drop-overlay');
+  const errorEl = document.getElementById('error');
+  const filenameEl = document.getElementById('filename');
+  const fileInput = document.getElementById('file-input');
+  const toolbar = document.getElementById('toolbar');
+  const schemeSelect = document.getElementById('scheme-select');
+  let panZoomInstance = null;
+  let currentScheme = 'dark';
+  let lastDotSource = null;
+  let lastDotName = null;
+
+  // ── Color utilities ────────────────────────────────────────────
+  function parseHexColor(str) {
+    if (!str || typeof str !== 'string') return null;
+    str = str.trim();
+    const m = str.match(/^#([0-9a-fA-F]{3,8})$/);
+    if (!m) return null;
+    let hex = m[1];
+    if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+    if (hex.length < 6) return null;
+    return {
+      r: parseInt(hex.substr(0,2), 16),
+      g: parseInt(hex.substr(2,2), 16),
+      b: parseInt(hex.substr(4,2), 16),
+    };
+  }
+
+  function relativeLuminance(rgb) {
+    let r = rgb.r / 255, g = rgb.g / 255, b = rgb.b / 255;
+    r = r <= 0.03928 ? r/12.92 : Math.pow((r+0.055)/1.055, 2.4);
+    g = g <= 0.03928 ? g/12.92 : Math.pow((g+0.055)/1.055, 2.4);
+    b = b <= 0.03928 ? b/12.92 : Math.pow((b+0.055)/1.055, 2.4);
+    return 0.2126*r + 0.7152*g + 0.0722*b;
+  }
+
+  function isLightColor(hex) {
+    const rgb = parseHexColor(hex);
+    if (!rgb) return false;
+    return relativeLuminance(rgb) > 0.35;
+  }
+
+  function isDefaultBlack(val) {
+    if (!val) return true;
+    const v = val.toLowerCase().trim();
+    return v === '#000000' || v === '#000' || v === 'black';
+  }
+
+  function isDefaultWhite(val) {
+    if (!val) return false;
+    const v = val.toLowerCase().trim();
+    return v === '#ffffff' || v === '#fff' || v === 'white';
+  }
+
+  // Pick readable text color based on actual background fill
+  function textColorFor(bgHex, scheme) {
+    if (isLightColor(bgHex)) return scheme.darkText;
+    return scheme.text;
+  }
+
+  // ── Scheme selector setup ──────────────────────────────────────
+  for (const [key, s] of Object.entries(SCHEMES)) {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = s.label;
+    schemeSelect.appendChild(opt);
+  }
+
+  const saved = localStorage.getItem('dotviewer-scheme');
+  if (saved && SCHEMES[saved]) currentScheme = saved;
+  schemeSelect.value = currentScheme;
+
+  function applySchemeUI(s) {
+    document.body.style.background = s.bg;
+    document.body.style.color = s.uiText;
+    toolbar.style.background = s.toolbar;
+    toolbar.style.borderBottom = '1px solid ' + s.toolbarBorder;
+    toolbar.querySelectorAll('button, label, select').forEach(el => {
+      el.style.background = s.btn;
+      el.style.color = s.uiText;
+      el.style.borderColor = s.btnBorder;
+    });
+    filenameEl.style.color = s.dimText;
+    toolbar.querySelector('.help').style.color = s.hintText;
+    overlay.querySelector('.msg').style.color = s.overlayAccent;
+    overlay.querySelector('.sub').style.color = s.hintText;
+  }
+
+  // ── SVG recoloring (luminance-aware) ───────────────────────────
+  function applySchemeToSVG(svg, s) {
+    // Graph background → transparent
+    svg.querySelectorAll('.graph > polygon').forEach(p => {
+      p.setAttribute('fill', 'none');
+      p.setAttribute('stroke', 'none');
+    });
+
+    // Graph title text
+    svg.querySelectorAll('.graph > text').forEach(t => {
+      t.setAttribute('fill', s.text);
+    });
+
+    // ── Nodes: smart text color based on fill luminance ──
+    svg.querySelectorAll('.node').forEach(group => {
+      const shape = group.querySelector('polygon, ellipse, path, rect');
+      if (!shape) return;
+
+      let fill = shape.getAttribute('fill');
+
+      // Replace default white fills with scheme fill
+      if (isDefaultWhite(fill)) {
+        shape.setAttribute('fill', s.nodeFill);
+        fill = s.nodeFill;
+      }
+
+      // Replace default black strokes
+      if (isDefaultBlack(shape.getAttribute('stroke'))) {
+        shape.setAttribute('stroke', s.nodeStroke);
+      }
+
+      // Pick text color based on actual fill luminance
+      const actualFill = shape.getAttribute('fill') || s.nodeFill;
+      const tc = textColorFor(actualFill, s);
+      group.querySelectorAll('text').forEach(t => t.setAttribute('fill', tc));
+    });
+
+    // ── Clusters (subgraphs): same luminance logic ──
+    svg.querySelectorAll('.cluster').forEach(group => {
+      const shape = group.querySelector('polygon, path, rect');
+      if (!shape) return;
+
+      let fill = shape.getAttribute('fill');
+      if (isDefaultWhite(fill)) {
+        shape.setAttribute('fill', s.clusterFill);
+        fill = s.clusterFill;
+      }
+      if (isDefaultBlack(shape.getAttribute('stroke'))) {
+        shape.setAttribute('stroke', s.clusterStroke);
+      }
+
+      // Cluster title text
+      const actualFill = shape.getAttribute('fill') || s.bg;
+      // Cluster labels sit on the cluster bg, but also on the page bg
+      // Use scheme text for cluster labels (they're at the top edge)
+      group.querySelectorAll(':scope > text').forEach(t => {
+        // If the cluster has a custom fontcolor, leave it; otherwise adapt
+        if (isDefaultBlack(t.getAttribute('fill'))) {
+          t.setAttribute('fill', s.text);
+        } else {
+          // Custom fontcolor: check if it's readable against page bg
+          const customColor = t.getAttribute('fill');
+          if (isLightColor(s.bg) === isLightColor(customColor)) {
+            // Same lightness = poor contrast, override
+            t.setAttribute('fill', s.text);
+          }
+        }
+      });
+    });
+
+    // ── Edges ──
+    svg.querySelectorAll('.edge path').forEach(el => {
+      if (isDefaultBlack(el.getAttribute('stroke'))) {
+        el.setAttribute('stroke', s.edgeStroke);
+      }
+    });
+    svg.querySelectorAll('.edge polygon').forEach(el => {
+      if (isDefaultBlack(el.getAttribute('stroke'))) el.setAttribute('stroke', s.edgeArrow);
+      if (isDefaultBlack(el.getAttribute('fill')))   el.setAttribute('fill', s.edgeArrow);
+    });
+    // Edge label text
+    svg.querySelectorAll('.edge text').forEach(t => {
+      if (isDefaultBlack(t.getAttribute('fill'))) {
+        t.setAttribute('fill', s.text);
+      }
+    });
+  }
+
+  function applyScheme(key) {
+    const s = SCHEMES[key];
+    if (!s) return;
+    currentScheme = key;
+    localStorage.setItem('dotviewer-scheme', key);
+    applySchemeUI(s);
+    if (lastDotSource) renderDot(lastDotSource, lastDotName);
+  }
+
+  schemeSelect.addEventListener('change', () => applyScheme(schemeSelect.value));
+
+  // ── Rendering ──────────────────────────────────────────────────
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.style.display = 'block';
+    setTimeout(() => errorEl.style.display = 'none', 8000);
+  }
+
+  async function renderDot(source, name) {
+    errorEl.style.display = 'none';
+    lastDotSource = source;
+    lastDotName = name;
+    try {
+      const viz = await Viz.instance();
+      const svg = viz.renderSVGElement(source);
+
+      if (panZoomInstance) { panZoomInstance.destroy(); panZoomInstance = null; }
+      container.innerHTML = '';
+
+      svg.setAttribute('width', '100%');
+      svg.setAttribute('height', '100%');
+      svg.style.background = 'transparent';
+
+      applySchemeToSVG(svg, SCHEMES[currentScheme]);
+      container.appendChild(svg);
+
+      panZoomInstance = svgPanZoom(svg, {
+        zoomEnabled: true, controlIconsEnabled: false,
+        fit: true, center: true,
+        minZoom: 0.1, maxZoom: 40, zoomScaleSensitivity: 0.3,
+      });
+
+      overlay.classList.remove('empty');
+      overlay.classList.add('hidden');
+      filenameEl.textContent = name || '';
+    } catch (e) {
+      showError('Render error: ' + e.message);
+    }
+  }
+
+  // ── File handling ──────────────────────────────────────────────
+  function readFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => renderDot(reader.result, file.name);
+    reader.onerror = () => showError('Failed to read file');
+    reader.readAsText(file);
+  }
+
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files[0]) readFile(e.target.files[0]);
+  });
+  overlay.addEventListener('click', () => fileInput.click());
+
+  // Drag and drop
+  document.body.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    overlay.classList.add('dragging');
+    overlay.classList.remove('hidden');
+    overlay.style.borderColor = SCHEMES[currentScheme].overlayAccent;
+    overlay.style.background = SCHEMES[currentScheme].overlayAccent + '18';
+  });
+  document.body.addEventListener('dragleave', (e) => {
+    if (e.relatedTarget === null || !document.body.contains(e.relatedTarget)) {
+      overlay.classList.remove('dragging');
+      overlay.style.background = '';
+      if (panZoomInstance) overlay.classList.add('hidden');
+    }
+  });
+  document.body.addEventListener('drop', (e) => {
+    e.preventDefault();
+    overlay.classList.remove('dragging');
+    overlay.style.background = '';
+    if (panZoomInstance) overlay.classList.add('hidden');
+    const file = e.dataTransfer.files[0];
+    if (file) readFile(file);
+  });
+
+  // Toolbar buttons
+  document.getElementById('btn-fit').addEventListener('click', () => {
+    if (panZoomInstance) { panZoomInstance.fit(); panZoomInstance.center(); }
+  });
+  document.getElementById('btn-zoom-in').addEventListener('click', () => {
+    if (panZoomInstance) panZoomInstance.zoomIn();
+  });
+  document.getElementById('btn-zoom-out').addEventListener('click', () => {
+    if (panZoomInstance) panZoomInstance.zoomOut();
+  });
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    if (e.target === schemeSelect) return;
+    if (!panZoomInstance) return;
+    if (e.key === 'Home' || e.key === '0') { panZoomInstance.fit(); panZoomInstance.center(); }
+    if (e.key === '=' || e.key === '+') panZoomInstance.zoomIn();
+    if (e.key === '-') panZoomInstance.zoomOut();
+  });
+
+  // Apply initial scheme
+  applyScheme(currentScheme);
+
+  // Auto-render if content was injected by dotview CLI script
+  if (window.__DOT_CONTENT__) {
+    renderDot(window.__DOT_CONTENT__, window.__DOT_FILENAME__ || 'cli');
+  }
+})();
+</script>
+</body>
+</html>
