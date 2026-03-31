@@ -105,23 +105,42 @@
   #info-panel .ip-list li::before { content: "→ "; opacity: 0.5; }
   #info-panel .ip-empty { font-size: 12px; opacity: 0.4; font-style: italic; }
   /* ── SVG interaction classes ── */
-  .node, .edge, .cluster { transition: opacity 0.1s; }
+  .node, .edge, .cluster { transition: opacity 0.15s ease; }
   .node { cursor: pointer; }
-  /* Dimming */
+  .edge { cursor: pointer; }
+  /* Hover dimming (lighter — used only when no focus mode is active) */
   .node.dimmed, .edge.dimmed { opacity: 0.13 !important; }
   /* Hover */
   .node.hover-hl > ellipse, .node.hover-hl > polygon, .node.hover-hl > rect,
   .node.hover-hl > path { filter: brightness(1.4) drop-shadow(0 0 4px currentColor); }
   .edge.hover-hl path { stroke-width: 2.2px !important; }
-  /* Selected */
-  .node.selected > ellipse, .node.selected > polygon, .node.selected > rect,
-  .node.selected > path { stroke-width: 2.5px !important; filter: drop-shadow(0 0 7px var(--sel-glow, #58a6ff)); }
+  /* ── Focus mode (node click) ── */
+  /* Everything that is NOT in the local neighbourhood gets aggressively dimmed */
+  .node.focus-dim, .edge.focus-dim { opacity: 0.08 !important; transition: opacity 0.15s ease; }
+  /* The selected node: strong glow + thicker border */
+  .node.focus-selected > ellipse, .node.focus-selected > polygon,
+  .node.focus-selected > rect, .node.focus-selected > path {
+    stroke-width: 3.5px !important;
+    filter: drop-shadow(0 0 12px var(--sel-glow, #58a6ff)) brightness(1.4);
+  }
+  /* Edges directly connected to the selected node */
+  .edge.focus-edge-hl path { stroke-width: 2.5px !important; filter: brightness(1.7); }
+  .edge.focus-edge-hl polygon { filter: brightness(1.7); }
+  /* ── Focus mode (cluster click) ── */
+  /* Edges that cross the cluster boundary: half-visible hint */
+  .edge.focus-boundary { opacity: 0.35 !important; transition: opacity 0.15s ease; }
+  /* Cluster border glow when its contents are spotlighted */
+  .cluster.focus-cluster > polygon, .cluster.focus-cluster > rect,
+  .cluster.focus-cluster > path {
+    stroke-width: 2.5px !important;
+    filter: drop-shadow(0 0 8px var(--sel-glow, #58a6ff));
+  }
   /* Search */
   .node.search-match > ellipse, .node.search-match > polygon, .node.search-match > rect,
   .node.search-match > path { filter: brightness(1.5) drop-shadow(0 0 5px var(--sel-glow, #58a6ff)); stroke-width: 2px !important; }
   .node.search-dim, .edge.search-dim { opacity: 0.1 !important; }
-  /* Cluster hint */
-  .cluster { cursor: default; }
+  /* Cluster backgrounds are click-targets for focus */
+  .cluster > polygon, .cluster > rect, .cluster > path { cursor: pointer; }
   g[data-proxy-line] { pointer-events: none; }
 </style>
 </head>
@@ -146,7 +165,7 @@
     <input type="text" id="search-input" placeholder="Search nodes…">
     <span id="search-count"></span>
   </div>
-  <span class="help" id="help-text">scroll=zoom · drag=pan · dblclick cluster=collapse</span>
+  <span class="help" id="help-text">scroll=zoom · drag=pan · click node=focus · click edge=follow · click cluster=spotlight · dblclick cluster=collapse</span>
   <span class="filename" id="filename"></span>
 </div>
 
@@ -281,8 +300,9 @@
   let selectedNodeId = null;
   let searchQuery    = '';
   let currentRankdir = 'TB';
-  let isDragging     = false;
-  let vizPromise     = null;
+  let isDragging       = false;
+  let vizPromise       = null;
+  let focusedClusterId = null;   // null = no cluster focus, else the spotlighted cluster id
 
   // ── Color utilities ────────────────────────────────────────────────────
   function parseHexColor(str) {
@@ -516,12 +536,71 @@
     return svg ? (svg.querySelector('g.graph') || svg.querySelector('g')) : null;
   }
 
+  // ── Focus mode helpers ───────────────────────────────────────────────────────
+  // Remove every focus-mode CSS class from all nodes/edges/clusters.
+  // Called before entering any new focus state.
+  function clearFocusClasses() {
+    if (!graphData) return;
+    graphData.nodes.forEach(nd => nd.group.classList.remove(
+      'selected', 'focus-dim', 'focus-selected', 'focus-neighbor'
+    ));
+    graphData.edges.forEach(ed => ed.group.classList.remove(
+      'focus-dim', 'focus-edge-hl', 'focus-boundary'
+    ));
+    graphData.clusters.forEach(cl => cl.group.classList.remove('focus-cluster'));
+  }
+
+  // Re-centre the viewport on the named node (instant — no animation required).
+  function panToNode(nodeId) {
+    if (!panZoomInstance || !graphData) return;
+    const nd = graphData.nodes.get(nodeId);
+    if (!nd) return;
+    try {
+      const rect       = nd.group.getBoundingClientRect();
+      const canvasRect = container.getBoundingClientRect();
+      const nodeCX = rect.left + rect.width  / 2 - canvasRect.left;
+      const nodeCY = rect.top  + rect.height / 2 - canvasRect.top;
+      const dx = canvasRect.width  / 2 - nodeCX;
+      const dy = canvasRect.height / 2 - nodeCY;
+      const cur = panZoomInstance.getPan();
+      panZoomInstance.pan({ x: cur.x + dx, y: cur.y + dy });
+      // Zoom in slightly if graph is very zoomed-out so the target node is legible
+      const sizes = panZoomInstance.getSizes();
+      if (sizes.realZoom < 0.7) panZoomInstance.zoom(1.1);
+    } catch (e) { /* ignore */ }
+  }
+
+  // Spotlight a cluster: dim everything outside it, boundary edges at reduced opacity.
+  function focusCluster(clusterId) {
+    if (!graphData) return;
+    clearFocusClasses();
+    selectedNodeId   = null;
+    focusedClusterId = clusterId;
+
+    const allIds = getAllNodeIdsInCluster(clusterId);
+    const cl     = graphData.clusters.get(clusterId);
+    if (cl) cl.group.classList.add('focus-cluster');
+
+    graphData.nodes.forEach((nd, nid) => {
+      if (!allIds.has(nid)) nd.group.classList.add('focus-dim');
+    });
+
+    graphData.edges.forEach(ed => {
+      const fromIn = allIds.has(ed.from);
+      const toIn   = allIds.has(ed.to);
+      if      (!fromIn && !toIn)  ed.group.classList.add('focus-dim');
+      else if (fromIn  !== toIn)  ed.group.classList.add('focus-boundary');
+      // both endpoints inside → fully visible, no class needed
+    });
+  }
+
   // ── Hover highlighting ─────────────────────────────────────────────────
   function setupHoverHighlighting() {
     if (!graphData) return;
     graphData.nodes.forEach((nd, id) => {
       nd.group.addEventListener('mouseenter', () => {
-        if (isDragging || searchQuery) return;
+        // Suppress hover when any focus mode is active (focus provides its own dimming)
+        if (isDragging || searchQuery || selectedNodeId || focusedClusterId) return;
         applyHoverHighlight(id);
       });
       nd.group.addEventListener('mouseleave', () => {
@@ -570,19 +649,42 @@
   }
 
   function selectNode(id) {
-    deselectNode();
-    selectedNodeId = id;
+    // Clear any existing focus state (node or cluster)
+    clearFocusClasses();
+    infoPanel.classList.remove('visible');
+
+    selectedNodeId   = id;
+    focusedClusterId = null;
+
     const nd = graphData && graphData.nodes.get(id);
-    if (nd) nd.group.classList.add('selected');
+    if (!nd) return;
+
+    // ── Focus spotlight: find the local neighbourhood ──
+    const connEdges  = graphData.edges.filter(e => e.from === id || e.to === id);
+    const connNodeIds = new Set([id]);
+    connEdges.forEach(e => { connNodeIds.add(e.from); connNodeIds.add(e.to); });
+
+    // Selected node: strong glow
+    nd.group.classList.add('focus-selected');
+
+    // Neighbour nodes: keep fully visible (no class); everyone else dims aggressively
+    graphData.nodes.forEach((node, nid) => {
+      if (!connNodeIds.has(nid)) node.group.classList.add('focus-dim');
+    });
+
+    // Connected edges: highlighted; all others dim
+    graphData.edges.forEach(ed => {
+      if (ed.from === id || ed.to === id) ed.group.classList.add('focus-edge-hl');
+      else                                ed.group.classList.add('focus-dim');
+    });
+
     showInfoPanel(id);
   }
 
   function deselectNode() {
-    if (selectedNodeId && graphData) {
-      const nd = graphData.nodes.get(selectedNodeId);
-      if (nd) nd.group.classList.remove('selected');
-    }
-    selectedNodeId = null;
+    clearFocusClasses();
+    selectedNodeId   = null;
+    focusedClusterId = null;
     infoPanel.classList.remove('visible');
   }
 
@@ -639,29 +741,59 @@
   document.getElementById('ip-close').addEventListener('click', deselectNode);
 
   // ── Progressive reveal (cluster collapse/expand) ───────────────────────
-  function setupClusterCollapse() {
+  // Unified cluster interaction handler:
+  //   single-click  → spotlight focus (dims everything outside the cluster)
+  //   double-click  → collapse / expand (existing behaviour)
+  // A 240 ms debounce timer separates the two so a dblclick cancels the pending click action.
+  function setupClusterInteractions() {
     if (!graphData) return;
     graphData.clusters.forEach((cl, clusterId) => {
-      // Attach to the cluster polygon so dblclick on empty cluster space triggers it
       const shape = cl.group.querySelector(':scope > polygon, :scope > rect, :scope > path');
-      if (shape) {
-        shape.style.cursor = 'pointer';
-        shape.addEventListener('dblclick', (e) => {
-          e.stopPropagation();
-          if (cl.collapsed) expandCluster(clusterId);
-          else collapseCluster(clusterId);
-        });
-      }
-      // Also attach to the cluster title text
       const titleText = cl.group.querySelector(':scope > text');
+
+      let clickTimer = null;
+
+      const handleSingleClick = (e) => {
+        e.stopPropagation();
+        if (isDragging) return;
+        clearTimeout(clickTimer);
+        clickTimer = setTimeout(() => {
+          // Toggle: if this cluster is already focused, clear; otherwise focus it
+          if (focusedClusterId === clusterId) deselectNode();
+          else focusCluster(clusterId);
+        }, 240);
+      };
+
+      const handleDblClick = (e) => {
+        e.stopPropagation();
+        clearTimeout(clickTimer); // cancel the pending single-click action
+        if (cl.collapsed) expandCluster(clusterId);
+        else collapseCluster(clusterId);
+      };
+
+      if (shape) {
+        shape.addEventListener('click',    handleSingleClick);
+        shape.addEventListener('dblclick', handleDblClick);
+      }
       if (titleText) {
         titleText.style.cursor = 'pointer';
-        titleText.addEventListener('dblclick', (e) => {
-          e.stopPropagation();
-          if (cl.collapsed) expandCluster(clusterId);
-          else collapseCluster(clusterId);
-        });
+        titleText.addEventListener('dblclick', handleDblClick);
       }
+    });
+  }
+
+  // Edge click → "follow the arrow": pan to the target node and select it.
+  function setupEdgeClicks() {
+    if (!graphData) return;
+    graphData.edges.forEach(ed => {
+      ed.group.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (isDragging) return;
+        const targetId = ed.to;
+        if (!graphData.nodes.has(targetId)) return;
+        panToNode(targetId);
+        selectNode(targetId);
+      });
     });
   }
 
@@ -1024,7 +1156,8 @@
       graphData = analyzeGraph(svg);
       setupHoverHighlighting();
       setupClickSelection(svg);
-      setupClusterCollapse();
+      setupClusterInteractions();
+      setupEdgeClicks();
       setupNodeDragging(svg);
       if (searchQuery) applySearchHighlight(searchQuery);
       if (selectedNodeId && graphData.nodes.has(selectedNodeId)) {
