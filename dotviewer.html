@@ -143,6 +143,36 @@
   g[data-proxy-line] { pointer-events: none; }
   /* Wide invisible edge hit targets */
   .edge-hit-target { pointer-events: stroke; fill: none; stroke: transparent; stroke-width: 20px; cursor: pointer; }
+  /* ── Help panel ── */
+  #btn-help { font-weight: bold; min-width: 28px; text-align: center; }
+  #help-panel-wrap { position: relative; flex-shrink: 0; }
+  #help-panel {
+    position: absolute;
+    top: calc(100% + 6px); right: 0;
+    z-index: 200;
+    width: 340px;
+    border-radius: 6px;
+    border: 1px solid;
+    padding: 14px 16px;
+    display: none;
+    font-family: 'Consolas', 'Menlo', monospace;
+    font-size: 12px;
+    line-height: 1.65;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+    max-height: calc(100vh - 60px);
+    overflow-y: auto;
+  }
+  #help-panel.visible { display: block; }
+  #help-panel .hp-section { margin-bottom: 12px; }
+  #help-panel .hp-section:last-child { margin-bottom: 0; }
+  #help-panel .hp-title {
+    font-weight: bold; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.08em; opacity: 0.55; margin-bottom: 5px;
+    border-bottom: 1px solid rgba(128,128,128,0.25); padding-bottom: 3px;
+  }
+  #help-panel .hp-row { display: flex; gap: 10px; margin: 1px 0; }
+  #help-panel .hp-key { min-width: 130px; opacity: 0.55; flex-shrink: 0; }
+  #help-panel .hp-val { opacity: 0.9; }
 </style>
 </head>
 <body>
@@ -166,7 +196,47 @@
     <input type="text" id="search-input" placeholder="Search nodes…">
     <span id="search-count"></span>
   </div>
-  <span class="help" id="help-text">scroll=zoom · drag=pan · click node=focus · hover=info · click edge=follow · click cluster=spotlight · dblclick cluster=collapse · drag node/cluster=move</span>
+  <div id="help-panel-wrap">
+    <button id="btn-help" title="Keyboard shortcuts &amp; features">?</button>
+    <div id="help-panel">
+      <div class="hp-section">
+        <div class="hp-title">Keyboard</div>
+        <div class="hp-row"><span class="hp-key">Home / 0</span><span class="hp-val">Fit to screen</span></div>
+        <div class="hp-row"><span class="hp-key">+ / -</span><span class="hp-val">Zoom in / out</span></div>
+        <div class="hp-row"><span class="hp-key">Escape</span><span class="hp-val">Clear selection / search</span></div>
+      </div>
+      <div class="hp-section">
+        <div class="hp-title">Mouse</div>
+        <div class="hp-row"><span class="hp-key">Wheel</span><span class="hp-val">Zoom</span></div>
+        <div class="hp-row"><span class="hp-key">Drag background</span><span class="hp-val">Pan</span></div>
+      </div>
+      <div class="hp-section">
+        <div class="hp-title">Nodes</div>
+        <div class="hp-row"><span class="hp-key">Hover</span><span class="hp-val">Preview info panel + highlight neighbors</span></div>
+        <div class="hp-row"><span class="hp-key">Click</span><span class="hp-val">Focus mode — dims everything else</span></div>
+        <div class="hp-row"><span class="hp-key">Drag</span><span class="hp-val">Move node (edges become straight lines)</span></div>
+      </div>
+      <div class="hp-section">
+        <div class="hp-title">Edges</div>
+        <div class="hp-row"><span class="hp-key">Click</span><span class="hp-val">Follow arrow → pan to &amp; select target</span></div>
+      </div>
+      <div class="hp-section">
+        <div class="hp-title">Clusters</div>
+        <div class="hp-row"><span class="hp-key">Click background</span><span class="hp-val">Spotlight cluster contents</span></div>
+        <div class="hp-row"><span class="hp-key">Double-click</span><span class="hp-val">Collapse / expand cluster</span></div>
+        <div class="hp-row"><span class="hp-key">Drag background</span><span class="hp-val">Move entire cluster with contents</span></div>
+      </div>
+      <div class="hp-section">
+        <div class="hp-title">Toolbar</div>
+        <div class="hp-row"><span class="hp-key">Open .dot</span><span class="hp-val">Load a .dot / .gv file (or drag &amp; drop)</span></div>
+        <div class="hp-row"><span class="hp-key">Fit</span><span class="hp-val">Fit graph to viewport</span></div>
+        <div class="hp-row"><span class="hp-key">Reset Layout</span><span class="hp-val">Restore original layout &amp; positions</span></div>
+        <div class="hp-row"><span class="hp-key">Layout</span><span class="hp-val">Switch direction (TB / LR / BT / RL)</span></div>
+        <div class="hp-row"><span class="hp-key">Scheme</span><span class="hp-val">Change color theme</span></div>
+        <div class="hp-row"><span class="hp-key">Search</span><span class="hp-val">Filter / highlight nodes by label</span></div>
+      </div>
+    </div>
+  </div>
   <span class="filename" id="filename"></span>
 </div>
 
@@ -291,6 +361,8 @@
   const searchCount  = document.getElementById('search-count');
   const infoPanel    = document.getElementById('info-panel');
   const canvasEl     = document.getElementById('canvas');
+  const helpPanel    = document.getElementById('help-panel');
+  const btnHelp      = document.getElementById('btn-help');
 
   // ── State ──────────────────────────────────────────────────────────────────
   let panZoomInstance = null;
@@ -365,7 +437,13 @@
     searchInput.style.color = s.uiText;
     searchInput.style.borderColor = s.btnBorder;
     filenameEl.style.color = s.dimText;
-    document.getElementById('help-text').style.color = s.hintText;
+    btnHelp.style.background = s.btn;
+    btnHelp.style.color = s.uiText;
+    btnHelp.style.borderColor = s.btnBorder;
+    // Style help panel if already open
+    helpPanel.style.background = s.infoBg;
+    helpPanel.style.borderColor = s.infoBorder;
+    helpPanel.style.color = s.uiText;
     overlay.querySelector('.msg').style.color = s.overlayAccent;
     overlay.querySelector('.sub').style.color = s.hintText;
     searchCount.style.color = s.dimText;
@@ -492,6 +570,19 @@
       });
     });
 
+    // Direct parent cluster for each cluster (DOM walk to find nearest ancestor cluster)
+    clusters.forEach((cA) => {
+      cA.parentClusterId = null;
+      let par = cA.group.parentElement;
+      while (par) {
+        if (par.classList && par.classList.contains('cluster')) {
+          const pt = par.querySelector(':scope > title');
+          if (pt) { cA.parentClusterId = pt.textContent.trim(); break; }
+        }
+        par = par.parentElement;
+      }
+    });
+
     // Second pass: find nodes
     svg.querySelectorAll('.node').forEach(group => {
       const titleEl = group.querySelector('title');
@@ -554,25 +645,49 @@
   function getEffectiveCenter(nd) {
     let x = nd.center.x + (nd.dragDx || 0);
     let y = nd.center.y + (nd.dragDy || 0);
-    // Walk up the DOM to add ancestor cluster drag offsets
-    let el = nd.group.parentElement;
+    // Walk up the cluster chain using clusterId / parentClusterId (not DOM walk,
+    // because Graphviz nodes are NOT DOM children of cluster groups).
+    let cid = nd.clusterId;
     const visited = new Set();
-    while (el) {
-      if (el.classList && el.classList.contains('cluster') && !visited.has(el)) {
-        visited.add(el);
-        const titleEl = el.querySelector(':scope > title');
-        if (titleEl) {
-          const cid = titleEl.textContent.trim();
-          const cl = graphData && graphData.clusters.get(cid);
-          if (cl) {
-            x += (cl.dragDx || 0);
-            y += (cl.dragDy || 0);
-          }
-        }
-      }
-      el = el.parentElement;
+    while (cid && !visited.has(cid)) {
+      visited.add(cid);
+      const cl = graphData && graphData.clusters.get(cid);
+      if (!cl) break;
+      x += (cl.dragDx || 0);
+      y += (cl.dragDy || 0);
+      cid = cl.parentClusterId || null;
     }
     return { x, y };
+  }
+
+  // Helper: compute total cluster drag offset for a node (sum of all ancestor cluster drags).
+  function getClusterDragOffset(nodeId) {
+    const nd = graphData && graphData.nodes.get(nodeId);
+    if (!nd) return { dx: 0, dy: 0 };
+    let dx = 0, dy = 0;
+    let cid = nd.clusterId;
+    const visited = new Set();
+    while (cid && !visited.has(cid)) {
+      visited.add(cid);
+      const cl = graphData.clusters.get(cid);
+      if (!cl) break;
+      dx += (cl.dragDx || 0);
+      dy += (cl.dragDy || 0);
+      cid = cl.parentClusterId || null;
+    }
+    return { dx, dy };
+  }
+
+  // Apply the current cluster drag offsets to every node group visually
+  // (nodes are NOT DOM children of cluster groups in Graphviz SVG, so they must be moved manually).
+  function applyClusterTranslationToNodes(clusterId) {
+    const allIds = getAllNodeIdsInCluster(clusterId);
+    allIds.forEach(nodeId => {
+      const nd = graphData.nodes.get(nodeId);
+      if (!nd) return;
+      const { dx, dy } = getClusterDragOffset(nodeId);
+      nd.group.setAttribute('transform', `translate(${dx + (nd.dragDx || 0)},${dy + (nd.dragDy || 0)})`);
+    });
   }
 
   // ── Refresh all persistent proxy lines ────────────────────────────────────
@@ -839,21 +954,14 @@
       const shape     = cl.group.querySelector(':scope > polygon, :scope > rect, :scope > path');
       const titleText = cl.group.querySelector(':scope > text');
 
-      // State for double-click detection (timing-based, works with our mousedown approach)
-      let lastPointerUpTime = 0;
-      let singleClickTimer  = null;
-
-      // Cluster mousedown: handles both drag and click/double-click.
-      // If mouse moves > 5px → drag. Otherwise → single/double click.
+      // ── Drag handling (mousedown only — click/dblclick handled by native events below) ──
       const handleClusterMouseDown = (e) => {
-        // If the actual target is a child node, let the node's own handler deal with it
         if (e.target.closest && e.target.closest('.node')) return;
         if (e.button !== 0) return;
         e.stopPropagation();
 
         const mainG = getSVGMainGroup();
         const startPt = screenToSVG(e, mainG);
-        // Save current drag offset so we can compute delta from this mousedown
         const startDragDx = cl.dragDx || 0;
         const startDragDy = cl.dragDy || 0;
         let clDx = 0, clDy = 0;
@@ -867,27 +975,22 @@
           clDy = curPt.y - startPt.y;
 
           if (!dragMode && Math.hypot(clDx, clDy) > 5) {
-            // Crossed the threshold: enter drag mode
             dragMode = true;
             isDragging = true;
             if (panZoomInstance) panZoomInstance.disablePan();
             document.body.style.cursor = 'grabbing';
 
-            // Remove old cluster drag proxies
-            (cl.crossBoundaryProxies || []).forEach(p => p.remove());
+            // Remove old drag proxies/hidden edges for this cluster
+            (cl.crossBoundaryProxies || []).forEach(p => { if (p.line) p.line.remove(); else p.remove(); });
             cl.crossBoundaryProxies = [];
-            // Restore edges that were hidden by a previous cluster drag of this cluster
-            (cl.hiddenEdgeGroupsForDrag || []).forEach(eg => {
-              // Only restore if not also hidden by a node drag
-              eg.style.visibility = '';
-            });
+            (cl.hiddenEdgeGroupsForDrag || []).forEach(eg => { eg.style.visibility = ''; });
             cl.hiddenEdgeGroupsForDrag = [];
 
-            // Hide all edges connected to internal nodes; create proxy lines for all of them.
-            // (In Graphviz SVG, edge groups are NOT children of cluster groups,
-            //  so they don't move when the cluster group is translated.)
+            // Hide all edges touching internal nodes; create straight-line proxies.
+            // Graphviz SVG: edges are NOT children of cluster groups → they don't auto-move.
             const allIds = getAllNodeIdsInCluster(clusterId);
             const ns = 'http://www.w3.org/2000/svg';
+            const sc = SCHEMES[currentScheme];
             graphData.edges.forEach(ed => {
               const fIn = allIds.has(ed.from);
               const tIn = allIds.has(ed.to);
@@ -898,15 +1001,10 @@
                 const toNd   = graphData.nodes.get(ed.to);
                 if (fromNd && toNd) {
                   const line = document.createElementNS(ns, 'line');
-                  const s = SCHEMES[currentScheme];
-                  line.setAttribute('stroke', s.edgeStroke);
+                  line.setAttribute('stroke', sc.edgeStroke);
                   line.setAttribute('stroke-width', '1.2');
-                  line.setAttribute('opacity', '0.7');
-                  if (!fIn || !tIn) {
-                    // Cross-boundary: dashed
-                    line.setAttribute('stroke-dasharray', '5,3');
-                    line.setAttribute('opacity', '0.5');
-                  }
+                  line.setAttribute('opacity', fIn && tIn ? '0.7' : '0.5');
+                  if (!fIn || !tIn) line.setAttribute('stroke-dasharray', '5,3');
                   getSVGMainGroup().appendChild(line);
                   tempProxies.push({ line, fromNd, toNd });
                 }
@@ -917,15 +1015,18 @@
           if (dragMode) {
             cl.dragDx = startDragDx + clDx;
             cl.dragDy = startDragDy + clDy;
+            // Move cluster background/title (the cluster group itself)
             cl.group.setAttribute('transform', `translate(${cl.dragDx},${cl.dragDy})`);
-            // Update proxy lines using effective centers (which now include updated cl.dragDx/Dy)
+            // Bug 2 fix: also physically move node groups — Graphviz nodes are NOT
+            // DOM children of the cluster group, so they don't move automatically.
+            applyClusterTranslationToNodes(clusterId);
+            // Update proxy line endpoints
             tempProxies.forEach(pe => {
               const p1 = getEffectiveCenter(pe.fromNd);
               const p2 = getEffectiveCenter(pe.toNd);
               pe.line.setAttribute('x1', p1.x); pe.line.setAttribute('y1', p1.y);
               pe.line.setAttribute('x2', p2.x); pe.line.setAttribute('y2', p2.y);
             });
-            // Also refresh node drag proxies for nodes inside this cluster
             refreshAllProxyLines();
           }
         };
@@ -933,10 +1034,9 @@
         const onMouseUp = () => {
           document.removeEventListener('mousemove', onMouseMove);
           document.removeEventListener('mouseup', onMouseUp);
-
           if (dragMode) {
-            // Finalize drag: cl.dragDx/Dy already up-to-date from mousemove
             cl.group.setAttribute('transform', `translate(${cl.dragDx},${cl.dragDy})`);
+            applyClusterTranslationToNodes(clusterId);
             cl.crossBoundaryProxies = tempProxies;
             cl.hiddenEdgeGroupsForDrag = hiddenForDrag;
             refreshAllProxyLines();
@@ -944,25 +1044,9 @@
             if (panZoomInstance) panZoomInstance.enablePan();
             document.body.style.cursor = '';
           } else {
-            // Was a click (mouse barely moved) — detect single vs double click
-            cl.dragDx = startDragDx; // ensure no drift from tiny movements
+            // No drag — restore to avoid sub-pixel drift
+            cl.dragDx = startDragDx;
             cl.dragDy = startDragDy;
-            const now = Date.now();
-            if (now - lastPointerUpTime < 300) {
-              // Double-click: collapse/expand
-              clearTimeout(singleClickTimer);
-              singleClickTimer = null;
-              lastPointerUpTime = 0;
-              if (cl.collapsed) expandCluster(clusterId);
-              else collapseCluster(clusterId);
-            } else {
-              lastPointerUpTime = now;
-              clearTimeout(singleClickTimer);
-              singleClickTimer = setTimeout(() => {
-                if (focusedClusterId === clusterId) deselectNode();
-                else focusCluster(clusterId);
-              }, 300);
-            }
           }
         };
 
@@ -970,23 +1054,53 @@
         document.addEventListener('mouseup', onMouseUp);
       };
 
-      if (shape) shape.addEventListener('mousedown', handleClusterMouseDown);
+      // ── Click / dblclick: use NATIVE dblclick event (reliable, no timing hacks) ──
+      // Single click with 260ms delay: spotlight cluster. dblclick cancels it and collapses.
+      let shapeClickTimer = null;
 
-      // Title text: keep click/dblclick for label area (simpler interaction on text)
+      const handleShapeClick = (e) => {
+        if (isDragging) return;
+        e.stopPropagation();
+        clearTimeout(shapeClickTimer);
+        shapeClickTimer = setTimeout(() => {
+          shapeClickTimer = null;
+          if (focusedClusterId === clusterId) deselectNode();
+          else focusCluster(clusterId);
+        }, 260);
+      };
+
+      const handleShapeDblClick = (e) => {
+        e.stopPropagation();
+        clearTimeout(shapeClickTimer);
+        shapeClickTimer = null;
+        if (cl.collapsed) expandCluster(clusterId);
+        else collapseCluster(clusterId);
+      };
+
+      if (shape) {
+        shape.addEventListener('mousedown', handleClusterMouseDown);
+        shape.addEventListener('click',    handleShapeClick);
+        shape.addEventListener('dblclick', handleShapeDblClick);
+      }
+
+      // Title text: same click/dblclick pattern
       if (titleText) {
         titleText.style.cursor = 'pointer';
         let titleClickTimer = null;
         titleText.addEventListener('click', (e) => {
+          if (isDragging) return;
           e.stopPropagation();
           clearTimeout(titleClickTimer);
           titleClickTimer = setTimeout(() => {
+            titleClickTimer = null;
             if (focusedClusterId === clusterId) deselectNode();
             else focusCluster(clusterId);
-          }, 300);
+          }, 260);
         });
         titleText.addEventListener('dblclick', (e) => {
           e.stopPropagation();
           clearTimeout(titleClickTimer);
+          titleClickTimer = null;
           if (cl.collapsed) expandCluster(clusterId);
           else collapseCluster(clusterId);
         });
@@ -1435,7 +1549,41 @@
     if (e.key==='Home'||e.key==='0') { panZoomInstance.fit(); panZoomInstance.center(); }
     if (e.key==='='||e.key==='+') panZoomInstance.zoomIn();
     if (e.key==='-') panZoomInstance.zoomOut();
-    if (e.key==='Escape') { deselectNode(); searchInput.value=''; applySearchHighlight(''); }
+    if (e.key==='Escape') {
+      deselectNode();
+      searchInput.value=''; applySearchHighlight('');
+      helpPanel.classList.remove('visible');
+    }
+  });
+
+  // ── Help panel toggle ────────────────────────────────────────────────────────────────────────
+  let helpOpen = false;
+
+  function openHelp() {
+    helpOpen = true;
+    helpPanel.classList.add('visible');
+    const s = SCHEMES[currentScheme];
+    helpPanel.style.background   = s.infoBg;
+    helpPanel.style.borderColor  = s.infoBorder;
+    helpPanel.style.color        = s.uiText;
+    // Style all section titles in the current scheme
+    helpPanel.querySelectorAll('.hp-title').forEach(el => { el.style.borderColor = s.btnBorder; });
+    helpPanel.querySelectorAll('.hp-key').forEach(el => { el.style.color = s.dimText; });
+  }
+
+  function closeHelp() {
+    helpOpen = false;
+    helpPanel.classList.remove('visible');
+  }
+
+  btnHelp.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (helpOpen) closeHelp(); else openHelp();
+  });
+
+  // Close help when clicking outside
+  document.addEventListener('click', (e) => {
+    if (helpOpen && !helpPanel.contains(e.target) && e.target !== btnHelp) closeHelp();
   });
 
   // ── Init ───────────────────────────────────────────────────────────────────
