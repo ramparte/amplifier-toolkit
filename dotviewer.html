@@ -727,12 +727,39 @@
   // (nodes are NOT DOM children of cluster groups in Graphviz SVG, so they must be moved manually).
   function applyClusterTranslationToNodes(clusterId) {
     const allIds = getAllNodeIdsInCluster(clusterId);
+    // Move all nodes inside the cluster (they're DOM siblings, not children)
     allIds.forEach(nodeId => {
       const nd = graphData.nodes.get(nodeId);
       if (!nd) return;
       const { dx, dy } = getClusterDragOffset(nodeId);
       nd.group.setAttribute('transform', `translate(${dx + (nd.dragDx || 0)},${dy + (nd.dragDy || 0)})`);
     });
+    // Also move child cluster <g> groups -- they're ALSO DOM siblings, not children.
+    // Without this, dragging a parent cluster leaves inner cluster backgrounds behind.
+    function moveChildClusters(cid) {
+      const cl = graphData.clusters.get(cid);
+      if (!cl) return;
+      cl.childClusterIds.forEach(childId => {
+        const childCl = graphData.clusters.get(childId);
+        if (!childCl) return;
+        // Accumulate drag offsets from this child up through all ancestor clusters
+        let dx = childCl.dragDx || 0, dy = childCl.dragDy || 0;
+        let pid = childCl.parentClusterId;
+        const visited = new Set();
+        while (pid && !visited.has(pid)) {
+          visited.add(pid);
+          const pCl = graphData.clusters.get(pid);
+          if (!pCl) break;
+          dx += pCl.dragDx || 0;
+          dy += pCl.dragDy || 0;
+          pid = pCl.parentClusterId;
+        }
+        childCl.group.setAttribute('transform', `translate(${dx},${dy})`);
+        // Recurse into grandchildren
+        moveChildClusters(childId);
+      });
+    }
+    moveChildClusters(clusterId);
   }
 
   // ── Refresh all persistent proxy lines ────────────────────────────────────
