@@ -545,6 +545,34 @@
     const edges    = [];
     const clusters = new Map();
 
+    // ── BBox helpers ────────────────────────────────────────────────────────────
+    // Graphviz SVG puts .node groups as SIBLINGS of .cluster groups (not children).
+    // We must use bounding-box containment to assign nodes/clusters to their parents.
+
+    function getClusterBBox(cl) {
+      const shape = cl.group.querySelector(':scope > polygon, :scope > rect');
+      if (!shape) return null;
+      if (shape.tagName.toLowerCase() === 'polygon') {
+        const pts = shape.getAttribute('points').trim().split(/\s+/)
+          .map(p => p.split(',').map(Number)).filter(p => p.length === 2 && !isNaN(p[0]));
+        if (!pts.length) return null;
+        const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+        return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
+      }
+      // rect
+      const x = +shape.getAttribute('x') || 0, y = +shape.getAttribute('y') || 0;
+      const w = +shape.getAttribute('width') || 0, h = +shape.getAttribute('height') || 0;
+      return { minX: x, minY: y, maxX: x + w, maxY: y + h };
+    }
+
+    function bboxArea(bbox) {
+      return (bbox.maxX - bbox.minX) * (bbox.maxY - bbox.minY);
+    }
+
+    function pointInBBox(pt, bbox) {
+      return pt.x >= bbox.minX && pt.x <= bbox.maxX && pt.y >= bbox.minY && pt.y <= bbox.maxY;
+    }
+
     // First pass: find clusters
     svg.querySelectorAll('.cluster').forEach(group => {
       const titleEl = group.querySelector(':scope > title');
@@ -556,6 +584,7 @@
         group, label, nodeIds: new Set(), childClusterIds: new Set(),
         collapsed: false, hiddenNodes: [], hiddenEdges: [], proxyLines: [], placeholder: null,
         origLabel: label,
+        parentClusterId: null,
         // Drag state
         dragDx: 0, dragDy: 0,
         crossBoundaryProxies: [],   // proxy lines kept after cluster drag
@@ -563,23 +592,39 @@
       });
     });
 
-    // Nested cluster relationships
-    clusters.forEach((cA, idA) => {
-      clusters.forEach((cB, idB) => {
-        if (idA !== idB && cA.group.contains(cB.group)) cA.childClusterIds.add(idB);
-      });
+    // Compute bounding boxes for every cluster once
+    const clusterBBoxes = new Map();
+    clusters.forEach((cl, id) => {
+      const bbox = getClusterBBox(cl);
+      if (bbox) clusterBBoxes.set(id, bbox);
     });
 
-    // Direct parent cluster for each cluster (DOM walk to find nearest ancestor cluster)
-    clusters.forEach((cA) => {
-      cA.parentClusterId = null;
-      let par = cA.group.parentElement;
-      while (par) {
-        if (par.classList && par.classList.contains('cluster')) {
-          const pt = par.querySelector(':scope > title');
-          if (pt) { cA.parentClusterId = pt.textContent.trim(); break; }
+    // Cluster → parent cluster: innermost cluster whose bbox contains this cluster's center
+    // (fixes the DOM parent-walk which never worked because cluster groups are siblings)
+    clusters.forEach((cl, cid) => {
+      const bbox = clusterBBoxes.get(cid);
+      if (!bbox) return;
+      const center = { x: (bbox.minX + bbox.maxX) / 2, y: (bbox.minY + bbox.maxY) / 2 };
+      const area   = bboxArea(bbox);
+      let bestParent = null, bestParentArea = Infinity;
+      clusters.forEach((pCl, pid) => {
+        if (pid === cid) return;
+        const pBbox = clusterBBoxes.get(pid);
+        if (!pBbox) return;
+        const pArea = bboxArea(pBbox);
+        if (pArea > area && pointInBBox(center, pBbox) && pArea < bestParentArea) {
+          bestParentArea = pArea;
+          bestParent = pid;
         }
-        par = par.parentElement;
+      });
+      cl.parentClusterId = bestParent;
+    });
+
+    // Cluster → children: derive from parentClusterId assignments above
+    clusters.forEach((cl, cid) => {
+      if (cl.parentClusterId) {
+        const parent = clusters.get(cl.parentClusterId);
+        if (parent) parent.childClusterIds.add(cid);
       }
     });
 
@@ -592,17 +637,17 @@
       const label = labelEl ? labelEl.textContent.trim() : id;
       const center = getNodeCenter(group);
 
-      // Innermost cluster membership
-      let clusterId = null;
-      let par = group.parentElement;
-      while (par && par !== svg) {
-        if (par.classList && par.classList.contains('cluster')) {
-          const pt = par.querySelector(':scope > title');
-          clusterId = pt ? pt.textContent.trim() : null;
-          break;
+      // Innermost cluster membership via bbox containment
+      // (DOM parent-walk never worked — nodes are siblings of cluster groups in Graphviz SVG)
+      let clusterId = null, bestArea = Infinity;
+      clusters.forEach((cl, cid) => {
+        const bbox = clusterBBoxes.get(cid);
+        if (bbox && pointInBBox(center, bbox)) {
+          const area = bboxArea(bbox);
+          if (area < bestArea) { bestArea = area; clusterId = cid; }
         }
-        par = par.parentElement;
-      }
+      });
+
       nodes.set(id, {
         group, center, label, clusterId,
         // Drag state
@@ -1453,6 +1498,11 @@
 
       // Rebuild interactivity
       graphData = analyzeGraph(svg);
+      // Debug: verify cluster membership was resolved correctly
+      console.log('[dotviewer] Graph analyzed:', graphData.nodes.size, 'nodes,', graphData.edges.length, 'edges,', graphData.clusters.size, 'clusters');
+      graphData.clusters.forEach((cl, id) => {
+        console.log(`  cluster "${id}": ${cl.nodeIds.size} nodes, parent: ${cl.parentClusterId || 'none'}, children: [${[...cl.childClusterIds].join(', ')}]`);
+      });
       setupHoverHighlighting();
       setupClickSelection(svg);
       setupClusterInteractions();
