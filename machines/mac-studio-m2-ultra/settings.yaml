@@ -1,0 +1,64 @@
+bundle:
+  active: my-amplifier
+  added:
+    my-amplifier: /Users/sam/ANext/my-amplifier/bundle.md
+config:
+  providers:
+  - config:
+      auto_pull: "false"
+      default_model: qwen3.5:35b
+      enable_thinking: "true"
+      host: http://localhost:11434
+      num_ctx: "8192"
+      priority: 1
+      timeout: "600"
+    module: provider-ollama
+    source: git+https://github.com/microsoft/amplifier-module-provider-ollama@main
+overrides:
+  hooks-session-naming:
+    config:
+      provider_timeout: 60
+routing:
+  matrix: balanced
+  overrides:
+    general:
+      - provider: ollama
+        model: qwen3.5:35b
+    fast:
+      - provider: ollama
+        model: gemma4:e4b
+    coding:
+      - provider: ollama
+        model: qwen3-coder:30b
+    ui-coding:
+      - provider: ollama
+        model: qwen3-coder:30b
+    reasoning:
+      - provider: ollama
+        model: deepseek-r1:70b
+        config:
+          reasoning_effort: high
+    critique:
+      - provider: ollama
+        model: qwen3.5:35b
+    creative:
+      - provider: ollama
+        model: gemma4:31b
+    writing:
+      - provider: ollama
+        model: gemma4:31b
+    research:
+      - provider: ollama
+        model: qwen3.5:35b
+    vision:
+      - provider: ollama
+        model: qwen3-vl:32b
+    security-audit:
+      - provider: ollama
+        model: qwen3.5:35b
+    critical-ops:
+      - provider: ollama
+        model: qwen3.5:35b
+updates:
+  auto_prompt: true
+  check_frequency_hours: 24
