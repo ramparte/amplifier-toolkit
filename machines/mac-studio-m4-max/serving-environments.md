@@ -1,6 +1,6 @@
 # LLM Serving Environments on Apple Silicon
 
-Notes on different LLM serving environments for the Mac Studio M2 Ultra.
+Notes on different LLM serving environments for the Mac Studio M4 Max 128GB.
 
 ## What Works on Apple Silicon
 
@@ -71,13 +71,12 @@ with Ollama/MLX ecosystem.
 
 ## Apple Silicon Gotchas
 
-### bf16 Emulation
-M2 Ultra does not support bf16 natively. MLX models shipped in bf16 get emulated,
-which hurts prefill performance. Converting models to fp16 can help with prompt
-evaluation speed.
+### bf16 Support
+M4 Max supports bf16 natively (unlike M1/M2). No emulation penalty for MLX
+models shipped in bf16. This is a meaningful improvement over earlier chips.
 
 ### Memory Bandwidth is the Bottleneck
-At ~800 GB/s, the M2 Ultra is bandwidth-bound for inference. This means:
+At ~546 GB/s, the M4 Max is bandwidth-bound for inference. This means:
 - Tok/s scales linearly with active parameters (MoE wins)
 - Quantization barely affects speed (Q4 vs Q8 is nearly identical tok/s)
 - Quantization significantly affects quality (Q8 > Q4 for code tasks)
@@ -86,3 +85,9 @@ At ~800 GB/s, the M2 Ultra is bandwidth-bound for inference. This means:
 Longer context windows reduce generation speed due to KV cache size. The default
 `num_ctx: 8192` is a good balance. For long documents, consider increasing to
 16384 or 32768 but expect slower generation.
+
+### Multi-Model Warm Loading
+With `OLLAMA_MAX_LOADED_MODELS=3` and 128GB, the three primary models stay
+resident in memory (~77GB). This eliminates the 2-5s cold load penalty when
+Amplifier swaps between general/coding/fast roles during a session. The remaining
+~50GB handles KV caches, OS, and occasional 70B model loads.

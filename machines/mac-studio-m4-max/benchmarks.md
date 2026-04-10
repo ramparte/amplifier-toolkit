@@ -1,4 +1,4 @@
-# Ollama Model Benchmarks - Mac Studio M2 Ultra 256GB
+# Ollama Model Benchmarks - Mac Studio M4 Max 128GB
 
 Benchmarked: 2026-04-09/10
 Ollama: 0.20.4 (MLX backend)
@@ -65,9 +65,9 @@ more data moving through the memory bus per token, negating the MoE active-param
 advantage. For MoE to shine on this hardware, **use Q4 quantization** so the file
 size stays small relative to the active parameter count.
 
-With 256GB memory, larger MoE models like qwen3.5:122b-a10b (122B total, 10B
-active) could offer frontier quality at mid-tier speed -- but quantization choice
-will be critical.
+With 128GB memory, larger MoE models like qwen3.5:122b-a10b (122B total, 10B
+active) may work at Q4 but would consume most of the available RAM. Quantization
+choice will be critical.
 
 ### Cold Load Cost Varies Dramatically
 Models stored on the external SSD have load times proportional to file size:
@@ -78,13 +78,14 @@ Models stored on the external SSD have load times proportional to file size:
 
 ### Memory Bandwidth Is the Bottleneck
 All 30-35B dense models cluster around 21-22 tok/s regardless of architecture
-(qwen3, qwen3-vl, gemma4). This is the M2 Ultra's memory bandwidth ceiling for
+(qwen3, qwen3-vl, gemma4). This is the M4 Max's memory bandwidth ceiling for
 that parameter count. Only MoE models or smaller models break above this.
 
 ### Quantization Matters Less Than Architecture
-With 256GB, we can afford Q8 or even larger quantizations. The difference between
+With 128GB, Q8 is affordable for most models under 35B. The difference between
 Q4 and Q8 is primarily quality (fewer logic errors in code), not speed, since the
-bottleneck is memory bandwidth not compute.
+bottleneck is memory bandwidth not compute. However, for MoE models, Q4 preserves
+the speed advantage by keeping file size proportional to active parameters.
 
 ### Q8 vs Q4 for MoE: Size Defeats Purpose
 qwen3.5:35b-a3b at Q8 (38 GB) performed identically to the dense qwen3.5:35b at

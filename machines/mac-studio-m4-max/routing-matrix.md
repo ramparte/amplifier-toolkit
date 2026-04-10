@@ -1,16 +1,16 @@
-# Routing Matrix Configuration - Mac Studio M2 Ultra
+# Routing Matrix Configuration - Mac Studio M4 Max 128GB
 
 ## Design Philosophy
 
 The routing matrix maps Amplifier's 13 model roles to local Ollama models. The
 key constraints on this hardware are:
 
-1. **Memory bandwidth (~800 GB/s) is the speed bottleneck** -- tok/s is
+1. **Memory bandwidth (~546 GB/s) is the speed bottleneck** -- tok/s is
    proportional to active parameters, not total parameters
-2. **External SSD storage means model swaps are expensive** -- 19-32s for 70B
-   models, 2-5s for 30-35B models, <1s for <10GB models
-3. **256GB unified memory** -- can load very large models; MoE models are ideal
-   because only active parameters consume bandwidth
+2. **External NVMe SSD means model swaps are fast but not instant** -- 19-32s
+   for 70B models, 2-5s for 30-35B models, <1s for <10GB models
+3. **128GB unified memory** -- can keep 3 models warm (~77GB), with room for
+   occasional 70B loads; MoE models are ideal at Q4 quantization
 
 ### Guiding Principles
 
