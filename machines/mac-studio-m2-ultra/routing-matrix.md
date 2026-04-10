@@ -72,15 +72,31 @@ These models were benchmarked but not selected for the primary routing:
 | qwen3:8b (5.2 GB) | 75.3 tok/s | Replaced by gemma4:e4b (faster and smarter as MoE 26B) |
 | mistral-small3.2 (15 GB) | 31.7 tok/s | Good prompt eval but slower generation than qwen3.5 |
 
-## Potential Upgrades (Pending Benchmarks)
+## Benchmarked But Not Selected
+
+| Model | Speed | Why Not Primary |
+|-------|-------|-----------------|
+| qwen3.5:35b-a3b-q8_0 (38 GB) | 39.3 tok/s | MoE at Q8 is no faster than dense Q4 (38 GB vs 23 GB negates MoE advantage) |
+| qwen3-coder-next (51 GB) | 37.4 tok/s | Better quality than qwen3-coder:30b but 2.3x slower |
+| glm-4.7-flash:q8_0 (31 GB) | 53.2 tok/s | Strong tool-calling; could replace qwen3.5 for some roles |
+| cogito:70b (42 GB) | 11.1 tok/s | Good for critique but 32s cold load too expensive |
+| llama3.3:70b (42 GB) | 11.1 tok/s | No clear advantage over deepseek-r1 for reasoning role |
+| qwen3:8b (5.2 GB) | 75.3 tok/s | Replaced by gemma4:e4b (faster and smarter as MoE 26B) |
+| mistral-small3.2 (15 GB) | 31.7 tok/s | Good prompt eval but slower generation than qwen3.5 |
+
+## Potential Upgrades
 
 | Model | Expected Impact | Status |
 |-------|-----------------|--------|
-| qwen3.5:35b-a3b-q8_0 (38 GB) | MoE variant could hit 80-100+ tok/s as `general` | Downloading |
-| qwen3.5:122b-a10b (~100 GB) | Frontier quality at ~50-70 tok/s, MoE (10B active) | Not yet pulled |
+| qwen3.5:35b-a3b Q4 (~23 GB) | MoE at Q4 may recover speed advantage over dense | Not yet tested |
+| qwen3.5:122b-a10b (~100 GB) | Frontier quality, MoE (10B active) | Not yet pulled |
 
-If qwen3.5:35b-a3b performs as expected, it could replace qwen3.5:35b as the
-general-purpose workhorse at 2x the speed.
+### Key Learning: MoE + Q8 = No Speed Win
+The qwen3.5:35b-a3b at Q8 (38 GB) was no faster than the dense qwen3.5:35b at
+Q4 (23 GB). The Q8 quantization inflated the model from ~23 GB to 38 GB, which
+means 65% more data through the memory bus per token -- negating the MoE advantage
+of only activating 3B of 35B parameters. MoE speed wins require Q4 to keep the
+file size small.
 
 ## Configuration File
 

@@ -15,6 +15,7 @@ Method: Cold start (model unloaded before each test), `num_ctx=4096`
 | qwen3:8b | 5.2 GB | 0.8s | 75.3 | 215.5 | 580 |
 | glm-4.7-flash:q8_0 | 31 GB | 4.4s | 53.2 | 90.7 | 1192 |
 | qwen3.5:35b | 23 GB | 2.0s | 42.9 | 162.6 | 4103 |
+| qwen3.5:35b-a3b-q8_0 | 38 GB | 2.4s | 39.3 | 117.0 | 4967 |
 | qwen3-coder-next | 51 GB | 2.9s | 37.4 | 70.1 | 338 |
 | mistral-small3.2 | 15 GB | 3.4s | 31.7 | 249.9 | 293 |
 | qwen3-vl:32b | 20 GB | 4.6s | 21.9 | 91.8 | 807 |
@@ -52,14 +53,21 @@ effective output speed may differ in non-thinking mode.
 
 ## Observations
 
-### MoE Models Are the Sweet Spot
-MoE (Mixture of Experts) models only activate a fraction of their parameters per
-token, so they achieve high tok/s despite having many total parameters:
-- gemma4:e4b (26B total, ~4B active) = 79.2 tok/s
-- qwen3.5:35b uses MoE-like architecture = 42.9 tok/s
+### MoE Performance Depends on Quantization
+MoE models only activate a fraction of their parameters per token, but Q8
+quantization can negate the bandwidth advantage:
+- gemma4:e4b Q4 (26B total, ~4B active, 9.6 GB) = **79.2 tok/s** -- big win
+- qwen3.5:35b-a3b Q8 (35B total, ~3B active, 38 GB) = **39.3 tok/s** -- no faster than dense
+- qwen3.5:35b Q4 (dense, 23 GB) = **42.9 tok/s** -- slightly faster despite being dense
+
+The a3b MoE at Q8 is 38 GB vs 23 GB for the dense Q4. The larger file size means
+more data moving through the memory bus per token, negating the MoE active-param
+advantage. For MoE to shine on this hardware, **use Q4 quantization** so the file
+size stays small relative to the active parameter count.
 
 With 256GB memory, larger MoE models like qwen3.5:122b-a10b (122B total, 10B
-active) could offer frontier quality at mid-tier speed.
+active) could offer frontier quality at mid-tier speed -- but quantization choice
+will be critical.
 
 ### Cold Load Cost Varies Dramatically
 Models stored on the external SSD have load times proportional to file size:
@@ -78,7 +86,23 @@ With 256GB, we can afford Q8 or even larger quantizations. The difference betwee
 Q4 and Q8 is primarily quality (fewer logic errors in code), not speed, since the
 bottleneck is memory bandwidth not compute.
 
+### Q8 vs Q4 for MoE: Size Defeats Purpose
+qwen3.5:35b-a3b at Q8 (38 GB) performed identically to the dense qwen3.5:35b at
+Q4 (23 GB) -- both around 39-43 tok/s. The Q8 quantization expanded the model
+from ~23 GB to 38 GB, meaning the memory bus moves 65% more data per token. This
+negated the MoE advantage of only activating 3B of the 35B parameters.
+
+**Lesson**: For MoE models on bandwidth-limited hardware, Q4 quantization preserves
+the speed advantage. Use Q8 only for dense models where you want quality over speed.
+
+### Thinking Token Overhead
+Both qwen3.5:35b and qwen3.5:35b-a3b generated 4000-5000 tokens when thinking is
+enabled, vs ~200-400 tokens for non-thinking models. The `think: false` option in
+Ollama did not suppress thinking for the a3b variant (still generated ~4200 tokens).
+This means effective "useful output" tok/s is much lower than raw tok/s for these
+models when used with thinking enabled.
+
 ## Pending Benchmarks
 
-- [ ] qwen3.5:35b-a3b-q8_0 (38 GB, MoE -- expected 80-100+ tok/s)
-- [ ] qwen3.5:122b-a10b (not yet pulled)
+- [ ] qwen3.5:35b-a3b Q4 (to test if MoE speed advantage appears at lower quantization)
+- [ ] qwen3.5:122b-a10b (not yet pulled -- frontier quality MoE)
