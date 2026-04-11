@@ -4,6 +4,7 @@ bundle:
     my-amplifier: /Users/sam/ANext/my-amplifier/bundle.md
 config:
   providers:
+  # Primary: Ollama (multi-model routing matrix)
   - config:
       auto_pull: "false"
       default_model: qwen3.5:35b
@@ -14,6 +15,16 @@ config:
       timeout: "600"
     module: provider-ollama
     source: git+https://github.com/microsoft/amplifier-module-provider-ollama@main
+  # Secondary: oMLX (fast MLX inference, SSD KV cache)
+  # Accessed via fast-local agent's provider_preferences
+  - config:
+      base_url: http://localhost:8000/v1
+      api_key: not-needed
+      default_model: gemma-4-27b-it-4bit
+      priority: 2
+      timeout: "600"
+    module: provider-openai
+    source: git+https://github.com/microsoft/amplifier-module-provider-openai@main
 overrides:
   hooks-session-naming:
     config:

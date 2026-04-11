@@ -31,9 +31,50 @@ Ollama adds ~30% overhead vs raw MLX due to the Go wrapper layer. For a model
 doing 80 tok/s through Ollama, raw mlx-lm might achieve ~110 tok/s. This is the
 cost of multi-model management and API compatibility.
 
-## Alternatives Worth Exploring
+## Dual-Provider Setup: Ollama + oMLX
 
-### oMLX (SSD-Backed KV Cache)
+This machine runs both Ollama and oMLX simultaneously:
+
+```
+Ollama  (port 11434)  ── provider-ollama  ── routing matrix (13 roles)
+oMLX    (port 8000)   ── provider-openai  ── fast-local agent (explicit)
+```
+
+### Why Both?
+
+Ollama handles multi-model warm loading (3 models, ~77GB) and the routing matrix.
+oMLX handles fast, long-context work with two key advantages:
+
+1. **~30% faster raw inference** -- native MLX, no Go wrapper overhead
+2. **SSD-backed KV cache** -- returning to a long conversation is <5s instead of
+   30-90s because oMLX persists KV blocks to SSD in safetensors format
+
+### How to Invoke oMLX from Amplifier
+
+The `fast-local` agent in the `my-amplifier` bundle has `provider_preferences`
+wired to `provider-openai` (which points at `http://localhost:8000/v1`). Say:
+
+```
+"Use the fast local agent to analyze this module"
+"Delegate this to fast-local"
+"Run this through oMLX"
+```
+
+### oMLX Configuration
+
+- Model: gemma-4-27b-it-4bit (MLX format, from mlx-community on HuggingFace)
+- Model dir: `/Volumes/ai-storage/models/omlx/`
+- SSD cache: `/Volumes/ai-storage/models/omlx/.cache/`
+- Port: 8000
+- Admin dashboard: `http://localhost:8000/admin`
+
+### Setup Script
+
+Run `setup-omlx.sh` in this directory to install and configure oMLX.
+
+## Other Alternatives
+
+### oMLX Details (SSD-Backed KV Cache)
 
 oMLX is specifically designed for coding agent workflows. Its key feature is
 SSD-backed KV caching: when an agent conversation grows (tool calls accumulating),
@@ -44,11 +85,6 @@ Benchmarks claim:
 - 5x faster than LM Studio MLX at 8K context (49s -> 1.7s prefill)
 - 1.6x faster for agent conversation patterns
 - Supports OpenAI and Anthropic API endpoints, plus tool calling
-
-This would be particularly valuable for Amplifier's multi-turn agent sessions
-with growing context. However, it would require either:
-- Pointing Amplifier's OpenAI provider at oMLX's API endpoint
-- Or writing a dedicated provider module
 
 ### vllm-mlx (Concurrent Requests)
 
