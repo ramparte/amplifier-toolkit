@@ -20,7 +20,7 @@ config:
   - config:
       base_url: http://localhost:8000/v1
       api_key: not-needed
-      default_model: gemma-4-27b-it-4bit
+      default_model: gemma-4-31b-it-4bit
       priority: 2
       timeout: "600"
     module: provider-openai

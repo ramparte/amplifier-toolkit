@@ -62,7 +62,7 @@ wired to `provider-openai` (which points at `http://localhost:8000/v1`). Say:
 
 ### oMLX Configuration
 
-- Model: gemma-4-27b-it-4bit (MLX format, from mlx-community on HuggingFace)
+- Model: gemma-4-31b-it-4bit (MLX format, from mlx-community on HuggingFace)
 - Model dir: `/Volumes/ai-storage/models/omlx/`
 - SSD cache: `/Volumes/ai-storage/models/omlx/.cache/`
 - Port: 8000
