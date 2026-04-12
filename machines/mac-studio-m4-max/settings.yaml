@@ -10,7 +10,7 @@ config:
       default_model: qwen3.5:35b
       enable_thinking: "true"
       host: http://localhost:11434
-      num_ctx: "8192"
+      num_ctx: "32768"
       priority: 1
       timeout: "600"
     module: provider-ollama
