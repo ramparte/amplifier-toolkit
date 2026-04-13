@@ -1,7 +1,9 @@
 bundle:
-  active: my-amplifier
+  active: exp-lean
   added:
     my-amplifier: /Users/sam/ANext/my-amplifier/bundle.md
+    my-amplifier-local: /Users/sam/ANext/my-amplifier/bundles/local-light.md
+    exp-lean: git+https://github.com/microsoft/amplifier-foundation@main#subdirectory=experiments/exp-lean/exp-lean-amplifier-dev.md
 config:
   providers:
   # Primary: Ollama (multi-model routing matrix)
@@ -10,7 +12,7 @@ config:
       default_model: qwen3.5:35b
       enable_thinking: "true"
       host: http://localhost:11434
-      num_ctx: "65536"
+      num_ctx: "131072"
       priority: 1
       timeout: "600"
     module: provider-ollama
